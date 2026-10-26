@@ -447,10 +447,16 @@ final class Server
 
         $extra = ['seq' => $replay->head, 'gap' => $replay->gap];
         if ($type === ChannelType::Presence && $result->member !== null) {
-            if ($this->broker->presenceJoin($key, $result->member, $this->options->serverId)) {
-                $this->broker->publishVolatile($key, ['type' => 'presence', 'channel' => $name, 'action' => 'join', 'member' => $result->member]);
+            try {
+                if ($this->broker->presenceJoin($key, $result->member, $this->options->serverId)) {
+                    $this->broker->publishVolatile($key, ['type' => 'presence', 'channel' => $name, 'action' => 'join', 'member' => $result->member]);
+                }
+                $extra['members'] = $this->broker->presenceMembers($key);
+            } catch (Throwable $e) {
+                $this->leave($connection, $subscription);
+                $this->log('error', "Presence join on {$key} failed: ".$e->getMessage());
+                throw new ProtocolException('unavailable', 'Channel temporarily unavailable', $message->id);
             }
-            $extra['members'] = $this->broker->presenceMembers($key);
         }
 
         $this->sendText($connection, ServerMessage::ack($message->id, $name, $extra));
