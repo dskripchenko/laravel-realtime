@@ -32,7 +32,16 @@ final class RespSubscriber
         private readonly ?string $password = null,
         private readonly bool $tls = false,
         private readonly float $timeout = 3.0,
+        private ?string $clientName = null,
     ) {}
+
+    /**
+     * Names the connection (CLIENT SETNAME) so operators can spot it in CLIENT LIST.
+     */
+    public function setClientName(?string $name): void
+    {
+        $this->clientName = $name === null ? null : (string) preg_replace('/\s+/', '-', $name);
+    }
 
     /**
      * @param  array<string, mixed>  $config  a Laravel "database.redis.<name>" entry
@@ -82,6 +91,14 @@ final class RespSubscriber
         if ($this->password !== null) {
             $auth = $this->username !== null ? ['AUTH', $this->username, $this->password] : ['AUTH', $this->password];
             $reply = $this->request($auth, static fn (mixed $r): bool => true);
+            if ($reply instanceof RuntimeException) {
+                $this->disconnect();
+                throw $reply;
+            }
+        }
+
+        if ($this->clientName !== null && $this->clientName !== '') {
+            $reply = $this->request(['CLIENT', 'SETNAME', $this->clientName], static fn (mixed $r): bool => true);
             if ($reply instanceof RuntimeException) {
                 $this->disconnect();
                 throw $reply;

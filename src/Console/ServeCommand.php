@@ -47,10 +47,13 @@ final class ServeCommand extends Command
             $exceptions->report($e);
         });
 
+        $subscriber = RespSubscriber::fromConfig($redisConfig);
+        $subscriber->setClientName('realtime-'.$options->serverId);
+
         $server = new Server(
             $options,
             $realtime->broker(),
-            RespSubscriber::fromConfig($redisConfig),
+            $subscriber,
             $realtime->authorizer(),
             function (string $level, string $message): void {
                 $line = '['.date('Y-m-d H:i:s').'] '.$level.': '.$message;
