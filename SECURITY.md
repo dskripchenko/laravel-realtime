@@ -8,10 +8,11 @@
 
 ## Reporting a vulnerability
 
-Please do not open a public issue. Email **denskrp90@gmail.com** with a description,
-affected versions and, if possible, a proof of concept. You will get an answer within
-five working days. Fixes are released as patch versions and credited in the changelog
-unless you ask otherwise.
+Please report privately through GitHub's
+[security advisories](https://github.com/dskripchenko/laravel-realtime/security/advisories/new),
+not in a public issue.
+Include affected versions and, if possible, a proof of concept. Fixes are released
+as patch versions and credited in the changelog unless you ask otherwise.
 
 ## Security model in short
 
