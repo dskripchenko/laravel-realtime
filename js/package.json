@@ -1,0 +1,48 @@
+{
+  "name": "@dskripchenko/realtime",
+  "version": "0.1.0",
+  "description": "Browser client for dskripchenko/laravel-realtime: tickets, reconnect with backoff, replay by sequence number, presence. Zero runtime dependencies.",
+  "license": "MIT",
+  "author": "Denis Skripchenko <denskrp90@gmail.com>",
+  "homepage": "https://github.com/dskripchenko/laravel-realtime/tree/main/js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dskripchenko/laravel-realtime.git",
+    "directory": "js"
+  },
+  "keywords": [
+    "websocket",
+    "realtime",
+    "laravel",
+    "presence",
+    "broadcasting"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

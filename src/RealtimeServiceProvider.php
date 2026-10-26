@@ -10,6 +10,7 @@ use Dskripchenko\Realtime\Broker\Broker;
 use Dskripchenko\Realtime\Broker\RedisBroker;
 use Dskripchenko\Realtime\Channels\ChannelAuthorizer;
 use Dskripchenko\Realtime\Channels\ChannelRegistry;
+use Dskripchenko\Realtime\Console\PublishCommand;
 use Dskripchenko\Realtime\Console\ServeCommand;
 use Dskripchenko\Realtime\Http\TicketController;
 use Illuminate\Auth\AuthManager;
@@ -83,7 +84,7 @@ final class RealtimeServiceProvider extends ServiceProvider
     {
         if ($this->app->runningInConsole()) {
             $this->publishes([__DIR__.'/../config/realtime.php' => $this->app->configPath('realtime.php')], 'realtime-config');
-            $this->commands([ServeCommand::class]);
+            $this->commands([ServeCommand::class, PublishCommand::class]);
         }
 
         $this->app->afterResolving(BroadcastManager::class, static function (BroadcastManager $broadcast): void {
