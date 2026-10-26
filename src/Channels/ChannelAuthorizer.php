@@ -101,6 +101,11 @@ final class ChannelAuthorizer
             return AuthorizationResult::deny('error');
         }
 
+        if ($result === false) {
+            // The hook refused without calling $next(), e.g. an unknown tenant.
+            return AuthorizationResult::deny();
+        }
+
         return $result instanceof AuthorizationResult ? $result : AuthorizationResult::deny('error');
     }
 }

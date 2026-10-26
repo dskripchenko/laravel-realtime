@@ -20,7 +20,7 @@ All notable changes to this project are documented in this file. The format foll
   `ack`, `error`, `ping`/`pong`, `welcome`, `resync`.
 - Scopes (tenants) baked into every channel key; `Realtime::resolveScopeUsing()`.
 - Channel authorization callbacks `Realtime::channel()`, wrapping hook
-  `Realtime::authorizeUsing()`, custom user loading `Realtime::resolveUserUsing()`.
+  `Realtime::authorizeUsing()` (returns `false` to refuse, e.g. an unknown tenant), custom user loading `Realtime::resolveUserUsing()`.
 - Ticket endpoint `POST /realtime/ticket`.
 - Broadcasting driver `realtime` (`ShouldBroadcast`, `toOthers()`), facade
   `Realtime::publish()`, `realtime:publish` command.

@@ -147,6 +147,25 @@ final class ChannelAuthorizationTest extends TestCase
         $this->assertFalse($authorizer->authorize($this->ticket(), 'private-board.1')->allowed);
     }
 
+    public function test_around_hook_refuses_with_false(): void
+    {
+        $called = false;
+        $registry = new ChannelRegistry;
+        $registry->register('board.{id}', static function () use (&$called): bool {
+            $called = true;
+
+            return true;
+        });
+        $authorizer = $this->authorizer($registry);
+        $authorizer->around(static fn (Ticket $ticket, Closure $next): mixed => $ticket->scope === 'acme' ? $next() : false);
+
+        $result = $authorizer->authorize($this->ticket('gone'), 'private-board.1');
+
+        $this->assertFalse($result->allowed);
+        $this->assertSame('forbidden', $result->reason);
+        $this->assertFalse($called);
+    }
+
     public function test_exceptions_deny_and_are_reported(): void
     {
         $registry = new ChannelRegistry;

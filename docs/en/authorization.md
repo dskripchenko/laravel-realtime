@@ -118,7 +118,8 @@ Realtime::authorizeUsing(function (Ticket $ticket, Closure $next): mixed {
 The hook:
 
 - receives the `Ticket` (`userId`, `guard`, `scope`, `issuedAt`);
-- must return what `$next()` returns;
+- must return what `$next()` returns, or `false` to refuse without calling it (for example,
+  when the ticket's tenant no longer exists or is suspended);
 - runs once per subscription;
 - must restore the previous context, even on exceptions (`try`/`finally`), because the
   process serves every tenant.
