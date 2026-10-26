@@ -1,0 +1,66 @@
+{
+    "name": "dskripchenko/laravel-realtime",
+    "description": "Self-hosted WebSocket server for Laravel: RFC 6455 on non-blocking PHP sockets, Redis/Valkey pub/sub fan-out, per-channel sequence numbers with replay, presence and a broadcasting driver.",
+    "type": "library",
+    "license": "MIT",
+    "homepage": "https://github.com/dskripchenko/laravel-realtime",
+    "keywords": ["laravel", "websocket", "realtime", "broadcasting", "presence", "redis", "valkey"],
+    "authors": [
+        {
+            "name": "Denis Skripchenko",
+            "email": "denskrp90@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "ext-redis": "*",
+        "illuminate/auth": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/broadcasting": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/console": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/contracts": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/http": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/redis": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/routing": "^11.0 || ^12.0 || ^13.0",
+        "illuminate/support": "^11.0 || ^12.0 || ^13.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.0",
+        "orchestra/testbench": "^9.0 || ^10.0 || ^11.0",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^11.0 || ^12.0"
+    },
+    "suggest": {
+        "ext-pcntl": "Graceful shutdown on SIGTERM/SIGINT"
+    },
+    "autoload": {
+        "psr-4": {
+            "Dskripchenko\\Realtime\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Dskripchenko\\Realtime\\Tests\\": "tests/",
+            "Workbench\\App\\": "workbench/app/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Dskripchenko\\Realtime\\RealtimeServiceProvider"
+            ],
+            "aliases": {
+                "Realtime": "Dskripchenko\\Realtime\\Facades\\Realtime"
+            }
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse",
+        "format": "pint"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
