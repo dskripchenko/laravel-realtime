@@ -26,7 +26,9 @@ All notable changes to this project are documented in this file. The format foll
   `Realtime::publish()`, `realtime:publish` command.
 - TypeScript client `@dskripchenko/realtime` (in `js/`): ticket fetch, reconnect with
   exponential backoff and jitter, resubscribe with replay, presence, client events,
-  typed handlers, keepalive. Zero runtime dependencies.
+  typed handlers, keepalive, handshake timeout (`connectTimeout`; an error before the
+  welcome counts as a drop, so a refused upgrade in Node does not hang). Zero runtime
+  dependencies.
 
 ### Not included yet
 

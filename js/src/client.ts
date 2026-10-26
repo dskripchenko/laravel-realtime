@@ -43,6 +43,8 @@ export interface RealtimeOptions {
   reconnect?: ReconnectOptions | false;
   /** Client keepalive interval in ms; defaults to the server's advertised heartbeat. */
   heartbeat?: number;
+  /** How long to wait for the server's welcome after opening the socket, in ms. Default 10 000. */
+  connectTimeout?: number;
   WebSocket?: WebSocketConstructor;
   fetch?: typeof fetch;
   /** Random source for jitter (tests). */
@@ -77,6 +79,7 @@ export class RealtimeClient {
   private manualClose = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastMessageAt = 0;
   private waiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
   private readonly host: ChannelHost;
@@ -207,8 +210,26 @@ export class RealtimeClient {
       if (this.ws === ws) this.onClose(event.code);
     };
     ws.onerror = () => {
-      // A close event always follows; reconnect logic lives there.
+      // Browsers follow an error with a close event, and reconnect logic lives
+      // there. Node's WebSocket does not after a refused handshake: it stays
+      // CONNECTING for good. Before the welcome, an error is the drop.
+      if (this.ws === ws && this.stateValue !== 'open') this.abandon(ws, 1006);
     };
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      if (this.ws === ws && this.stateValue !== 'open') this.abandon(ws, 4001, 'connect timeout');
+    }, this.options.connectTimeout ?? 10_000);
+  }
+
+  /** Gives up on a socket that never got to the welcome and handles it as a drop. */
+  private abandon(ws: WebSocketLike, code: number, reason?: string): void {
+    ws.onclose = null;
+    try {
+      ws.close(code === 1006 ? undefined : code, reason);
+    } catch {
+      // Closing a socket that never opened may throw; it is dropped either way.
+    }
+    this.onClose(code);
   }
 
   private async fetchTicket(): Promise<TicketResponse> {
@@ -243,6 +264,8 @@ export class RealtimeClient {
 
     switch (message.type) {
       case 'welcome':
+        if (this.connectTimer) clearTimeout(this.connectTimer);
+        this.connectTimer = null;
         this.socketIdValue = message.socket_id;
         this.attempts = 0;
         this.setState('open');
@@ -366,8 +389,10 @@ export class RealtimeClient {
   private clearTimers(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.connectTimer) clearTimeout(this.connectTimer);
     this.reconnectTimer = null;
     this.heartbeatTimer = null;
+    this.connectTimer = null;
   }
 }
 

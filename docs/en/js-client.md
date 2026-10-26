@@ -67,6 +67,14 @@ announced by the server in `welcome`, or set with `heartbeat` in ms. After two h
 of silence the client treats the link as dead and reconnects. This catches half-open TCP
 connections that the browser would otherwise notice only after minutes.
 
+### Handshake
+
+A socket that has not received the server's `welcome` within `connectTimeout` ms
+(10 000 by default) is closed with code 4001 and handled as a drop. An error before the
+welcome is a drop too: browsers follow it with a close event, but Node's built-in
+`WebSocket` keeps a socket whose upgrade was refused (bad `Origin`, expired ticket) in
+`CONNECTING` without ever closing it.
+
 ## Channels
 
 ```ts
@@ -127,7 +135,7 @@ through an in-memory socket in exactly this way (`js/test/fake-socket.ts`).
 
 | Member | Description |
 |--------|-------------|
-| `new RealtimeClient(options)` | `ticketUrl`, `fetchTicket`, `url`, `headers`, `credentials`, `reconnect`, `heartbeat`, `WebSocket`, `fetch`, `random` |
+| `new RealtimeClient(options)` | `ticketUrl`, `fetchTicket`, `url`, `headers`, `credentials`, `reconnect`, `heartbeat`, `connectTimeout`, `WebSocket`, `fetch`, `random` |
 | `connect(): Promise<void>` | Open (idempotent) |
 | `close()` | Close for good |
 | `subscribe(name)` / `private(name)` / `join(name)` | Get a `Channel` / `PresenceChannel` |

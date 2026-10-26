@@ -164,6 +164,44 @@ describe('connection', () => {
     expect(fetchTicket).toHaveBeenCalledTimes(1);
   });
 
+  it('treats an error before the welcome as a drop (Node keeps a refused socket CONNECTING)', async () => {
+    const { client, fetchTicket } = makeClient({ reconnect: { initialDelay: 10, jitter: 0 } });
+    const ready = client.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    const socket = FakeSocket.last();
+    socket.onerror?.({});
+
+    expect(client.state).toBe('reconnecting');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fetchTicket).toHaveBeenCalledTimes(2);
+    FakeSocket.last().accept();
+    await ready;
+    expect(client.state).toBe('open');
+    // A late close of the abandoned socket changes nothing.
+    socket.drop();
+    expect(client.state).toBe('open');
+  });
+
+  it('gives up on a socket that never gets the welcome', async () => {
+    const { client } = makeClient({ connectTimeout: 5_000, reconnect: false });
+    const failed = expect(client.connect()).rejects.toThrow('Connection lost');
+    await vi.advanceTimersByTimeAsync(0);
+    const socket = FakeSocket.last();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(socket.closedWith).toEqual({ code: 4001, reason: 'connect timeout' });
+    expect(client.state).toBe('closed');
+    await failed;
+  });
+
+  it('keeps an open connection when an error comes after the welcome', async () => {
+    const { client } = await connected();
+    FakeSocket.last().onerror?.({});
+    expect(client.state).toBe('open');
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(client.state).toBe('open');
+  });
+
   it('pings when idle and drops a silent connection', async () => {
     const { client } = await connected({ heartbeat: 10_000, reconnect: { initialDelay: 50_000, jitter: 0 } });
     const socket = FakeSocket.last();
