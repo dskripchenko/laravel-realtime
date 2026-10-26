@@ -67,7 +67,8 @@ return [
     ],
 
     'limits' => [
-        'max_connections' => (int) env('REALTIME_MAX_CONNECTIONS', 10000),
+        // stream_select() is bound by FD_SETSIZE (1024 on most PHP builds): scale out with more processes.
+        'max_connections' => (int) env('REALTIME_MAX_CONNECTIONS', 1000),
         'max_frame_size' => 65536,
         'max_message_size' => 65536,
         'max_subscriptions' => 100,
