@@ -145,6 +145,9 @@ web / queue workers ──EVAL publish──▶ Redis/Valkey ──pub/sub──
 
 ## Documentation
 
+Guides are available in English, [Русский](docs/ru/server.md), [Deutsch](docs/de/server.md)
+and [中文](docs/zh/server.md):
+
 - [Server](docs/en/server.md): the loop, limits, keepalive, health
 - [Protocol](docs/en/protocol.md): every message, with examples
 - [Authorization & tenancy](docs/en/authorization.md)
@@ -154,9 +157,13 @@ web / queue workers ──EVAL publish──▶ Redis/Valkey ──pub/sub──
 
 ## Status
 
-The current version is 0.1.0 and has not been released yet. permessage-deflate, the
-ext-event loop backend, Redis Cluster and the UI-kit adapter are not implemented yet. See
+The current version is 0.1.0, the first public release. permessage-deflate, the ext-event
+loop backend, Redis Cluster and the UI-kit adapter are not implemented yet. See
 [CHANGELOG.md](CHANGELOG.md).
+
+## Security
+
+Please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
 
 ## License
 

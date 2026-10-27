@@ -4,7 +4,9 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - Unreleased
+## [Unreleased]
+
+## [0.1.0] - 2026-10-27
 
 ### Added
 
@@ -37,3 +39,6 @@ All notable changes to this project are documented in this file. The format foll
 - TLS termination in the server itself.
 - Redis Cluster and predis.
 - UI kit adapter for `@dskripchenko/ui` components.
+
+[Unreleased]: https://github.com/dskripchenko/laravel-realtime/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/dskripchenko/laravel-realtime/releases/tag/v0.1.0
