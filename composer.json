@@ -11,6 +11,11 @@
             "email": "denskrp90@gmail.com"
         }
     ],
+    "support": {
+        "issues": "https://github.com/dskripchenko/laravel-realtime/issues",
+        "source": "https://github.com/dskripchenko/laravel-realtime",
+        "security": "https://github.com/dskripchenko/laravel-realtime/security/policy"
+    },
     "require": {
         "php": "^8.2",
         "ext-redis": "*",

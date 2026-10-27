@@ -1,0 +1,19 @@
+* text=auto eol=lf
+
+*.php diff=php
+*.md diff=markdown
+
+# Files exported when installing via Composer.
+# The JS client in js/ is published to npm as @dskripchenko/realtime.
+/.github               export-ignore
+/.gitattributes        export-ignore
+/.gitignore            export-ignore
+/CHANGELOG.md          export-ignore
+/docs                  export-ignore
+/js                    export-ignore
+/phpstan.neon          export-ignore
+/phpunit.xml           export-ignore
+/pint.json             export-ignore
+/testbench.yaml        export-ignore
+/tests                 export-ignore
+/workbench             export-ignore
