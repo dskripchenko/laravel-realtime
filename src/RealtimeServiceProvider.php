@@ -100,9 +100,11 @@ final class RealtimeServiceProvider extends ServiceProvider
         if ($config->get('realtime.routes.enabled', true) === true && ! ($this->app instanceof CachesRoutes && $this->app->routesAreCached())) {
             $prefix = $config->get('realtime.routes.prefix', 'realtime');
             $middleware = $config->get('realtime.routes.middleware', ['web', 'auth']);
-            Route::post((is_string($prefix) ? trim($prefix, '/') : 'realtime').'/ticket', TicketController::class)
+            // The name and the middleware go on the registrar before the
+            // route exists: Laravel 11 types Route::post() as array|Route.
+            Route::name('realtime.ticket')
                 ->middleware(is_array($middleware) ? $middleware : [])
-                ->name('realtime.ticket');
+                ->post((is_string($prefix) ? trim($prefix, '/') : 'realtime').'/ticket', TicketController::class);
         }
     }
 }
