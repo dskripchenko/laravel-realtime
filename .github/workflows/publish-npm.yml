@@ -1,0 +1,80 @@
+name: Publish the JS client to npm
+
+# A vX.Y.Z tag releases the PHP package (Packagist reads the tag) and, when
+# js/package.json names the same version, the browser client
+# @dskripchenko/realtime. A tag for the PHP package alone is a normal case:
+# nothing is published and the run stays green.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency: publish-npm
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      - name: Decide whether there is anything to publish
+        id: decide
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "push" ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME, js/package.json says $VERSION: nothing to publish."
+            echo "publish=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A rerun on a version already in the registry is not a failure.
+          if npm view "$NAME@$VERSION" version > /dev/null 2>&1; then
+            echo "$NAME@$VERSION is already in the registry."
+            echo "publish=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "publish=yes" >> "$GITHUB_OUTPUT"
+
+      - name: Install
+        if: steps.decide.outputs.publish == 'yes'
+        run: pnpm install --frozen-lockfile
+
+      # The tag may sit on a commit the branch CI never ran: a version in the
+      # registry cannot be taken back, so nothing unchecked goes there.
+      - name: Typecheck, test, build
+        if: steps.decide.outputs.publish == 'yes'
+        run: pnpm run typecheck && pnpm test && pnpm run build
+
+      - name: Publish
+        if: steps.decide.outputs.publish == 'yes'
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.decide.outputs.publish }}" = "yes" ]; then
+            echo "Published ${{ steps.decide.outputs.name }}@${{ steps.decide.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Nothing to publish (${{ steps.decide.outputs.name }}@${{ steps.decide.outputs.version }})." >> "$GITHUB_STEP_SUMMARY"
+          fi
