@@ -12,6 +12,7 @@ realtime.connect();
 const board = realtime.private<{ CardMoved: { id: number; column: string } }>('board.42');
 board.on('CardMoved', (card, meta) => console.log(card.id, 'moved, seq', meta.seq));
 board.onResync(() => reloadBoard());
+board.onRevoked(() => showNoAccess()); // the server dropped the subscription after access was revoked
 
 const page = realtime.join<{}, { name: string }>('page.7');
 page.onMembers((members) => renderAvatars(members));

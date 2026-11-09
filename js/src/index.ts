@@ -7,7 +7,7 @@ export type {
   WebSocketConstructor,
   WebSocketLike,
 } from './client.js';
-export { Channel, PresenceChannel } from './channel.js';
+export { Channel, PresenceChannel, REAUTHORIZE_EVENT } from './channel.js';
 export type { ChannelError, EventMap, EventMeta } from './channel.js';
 export { backoffDelay } from './backoff.js';
 export type { BackoffOptions } from './backoff.js';

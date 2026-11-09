@@ -85,6 +85,7 @@ board.onAny((event, data, meta) => {});
 board.onSubscribed(() => {});                 // after every (re)subscribe
 board.onError((e) => e.code === 'forbidden' && showNoAccess());
 board.onResync((seq) => reloadBoard());       // missed events are gone: reload state over HTTP
+board.onRevoked((e) => showNoAccess());       // access was revoked: the server dropped the subscription
 off();                                        // remove one handler
 board.unsubscribe();
 
@@ -97,6 +98,9 @@ realtime.leave('board.42');                   // unsubscribe by name
 - 在 `connect()` 之前调用 `subscribe`、`private` 或 `join` 没有问题，连接打开后会发送订阅。
 - 再次订阅同一名称会返回同一个频道对象。
 - `seq` 小于或等于已应用的最后一个序号的事件会被丢弃，因此重放与实时投递永远不会产生重复。
+- 当服务器在 `Realtime::reauthorize()` 之后移除订阅时（错误代码 `revoked`；`onError` 也会触发），
+  `onRevoked` 会触发。频道被标记为未订阅，presence 频道的成员列表被清空。重连后会再次订阅；
+  调用 `unsubscribe()` 可彻底移除该频道。
 
 ## Presence
 
@@ -133,7 +137,7 @@ page.on('client-typing', (data, meta) => showTyping(meta.userId, data));
 | `leave(name)` | 按名称取消订阅 |
 | `on('state' \| 'error' \| 'message', fn)` | 客户端事件；返回取消监听函数 |
 | `state`、`socketId` | 当前状态与套接字 id |
-| `Channel.on/onAny/onSubscribed/onError/onResync/whisper/unsubscribe` | 见上文 |
+| `Channel.on/onAny/onSubscribed/onError/onRevoked/onResync/whisper/unsubscribe` | 见上文 |
 | `Channel.lastSeq`、`Channel.subscribed` | 在频道中的位置与订阅状态 |
 | `PresenceChannel.members/onMembers/onJoin/onLeave/refresh` | Presence |
 

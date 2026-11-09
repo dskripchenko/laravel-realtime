@@ -6,6 +6,7 @@ namespace Dskripchenko\Realtime\Tests\Unit;
 
 use Dskripchenko\Realtime\Broker\Broker;
 use Dskripchenko\Realtime\Facades\Realtime;
+use Dskripchenko\Realtime\RealtimeManager;
 use Dskripchenko\Realtime\Tests\Support\FakeBroker;
 use Dskripchenko\Realtime\Tests\TestCase;
 use Illuminate\Auth\GenericUser;
@@ -70,6 +71,22 @@ final class BroadcasterTest extends TestCase
 
         $this->assertSame(1, $seq);
         $this->assertSame('tenant_7/private-board.1', $this->broker->published[0]['key']);
+    }
+
+    public function test_reauthorize_publishes_the_reserved_control_event(): void
+    {
+        Realtime::resolveScopeUsing(static fn (): string => 'acme');
+
+        $this->assertSame(1, Realtime::reauthorize('private-board.1'));
+        $this->assertSame(2, Realtime::reauthorize('private-board.1', 'acme'));
+        Realtime::reauthorize('presence-page.2', 'tenant_7');
+
+        $this->assertSame('realtime:reauthorize', RealtimeManager::REAUTHORIZE);
+        $this->assertSame([
+            ['key' => 'acme/private-board.1', 'message' => ['type' => 'event', 'channel' => 'private-board.1', 'event' => 'realtime:reauthorize', 'data' => []]],
+            ['key' => 'acme/private-board.1', 'message' => ['type' => 'event', 'channel' => 'private-board.1', 'event' => 'realtime:reauthorize', 'data' => []]],
+            ['key' => 'tenant_7/presence-page.2', 'message' => ['type' => 'event', 'channel' => 'presence-page.2', 'event' => 'realtime:reauthorize', 'data' => []]],
+        ], $this->broker->published);
     }
 
     public function test_publish_rejects_invalid_names(): void

@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static RealtimeManager resolveScopeUsing(?\Closure $resolver)
  * @method static string currentScope()
  * @method static int publish(string $channel, string $event, mixed $data = [], ?string $scope = null, ?string $except = null)
+ * @method static int reauthorize(string $channel, ?string $scope = null)
  * @method static \Dskripchenko\Realtime\Auth\IssuedTicket issueTicket(\Illuminate\Contracts\Auth\Authenticatable $user, ?string $guard = null, ?string $scope = null, ?\Illuminate\Http\Request $request = null)
  * @method static \Dskripchenko\Realtime\Broker\Broker broker()
  *

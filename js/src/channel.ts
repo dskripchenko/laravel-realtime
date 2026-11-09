@@ -3,6 +3,12 @@ import type { EventMessage, Member, PresenceMessage } from './protocol.js';
 
 export type EventMap = Record<string, unknown>;
 
+/**
+ * Reserved event of the server-side reauthorization request. Current servers consume it; servers that
+ * predate the feature forward it, and the client hides it from handlers.
+ */
+export const REAUTHORIZE_EVENT = 'realtime:reauthorize';
+
 export interface EventMeta {
   channel: string;
   event: string;
@@ -20,6 +26,7 @@ export interface ChannelError {
 type ChannelEvents = {
   subscribed: [];
   error: [ChannelError];
+  revoked: [ChannelError];
   resync: [number];
   event: [string, unknown, EventMeta];
 };
@@ -67,6 +74,15 @@ export class Channel<E extends EventMap = EventMap> {
   }
 
   /**
+   * Fires when the server dropped the subscription because access was revoked (error code "revoked").
+   * The channel stops receiving events; it stays registered and is subscribed again after a reconnect,
+   * which fails with "forbidden" while access is still missing. Call unsubscribe() to forget it.
+   */
+  onRevoked(handler: (error: ChannelError) => void): () => void {
+    return this.emitter.on('revoked', handler);
+  }
+
+  /**
    * Fires when missed events could not be replayed (buffer overrun, channel reset).
    * Refetch the state over HTTP; delivery continues from `seq`.
    */
@@ -111,6 +127,7 @@ export class Channel<E extends EventMap = EventMap> {
       if (this.lastSeq !== null && message.seq <= this.lastSeq) return;
       this.lastSeq = message.seq;
     }
+    if (message.event === REAUTHORIZE_EVENT) return;
     const meta: EventMeta = { channel: this.name, event: message.event, seq: message.seq };
     if (message.user_id !== undefined) meta.userId = message.user_id;
     this.emitter.emit('event', message.event, message.data, meta);
@@ -121,8 +138,15 @@ export class Channel<E extends EventMap = EventMap> {
 
   /** @internal */
   handleError(error: ChannelError): void {
+    if (error.code === 'revoked') {
+      this.subscribed = false;
+      this.handleRevoked();
+      this.emitter.emit('revoked', error);
+    }
     this.emitter.emit('error', error);
   }
+
+  protected handleRevoked(): void {}
 
   /** @internal */
   handleDisconnect(): void {
@@ -169,6 +193,12 @@ export class PresenceChannel<E extends EventMap = EventMap, Info = Record<string
     super.unsubscribe();
     this.presence.clear();
     this.memberMap.clear();
+  }
+
+  protected override handleRevoked(): void {
+    if (this.memberMap.size === 0) return;
+    this.memberMap.clear();
+    this.presence.emit('members', []);
   }
 
   /** @internal */

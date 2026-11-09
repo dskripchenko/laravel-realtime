@@ -15,6 +15,7 @@ use Dskripchenko\Realtime\Channels\ChannelType;
 use Dskripchenko\Realtime\Protocol\ClientMessage;
 use Dskripchenko\Realtime\Protocol\ProtocolException;
 use Dskripchenko\Realtime\Protocol\ServerMessage;
+use Dskripchenko\Realtime\RealtimeManager;
 use Dskripchenko\Realtime\WebSocket\CloseCode;
 use Dskripchenko\Realtime\WebSocket\Frame;
 use Dskripchenko\Realtime\WebSocket\FrameCodec;
@@ -463,10 +464,14 @@ final class Server
 
         if (! $replay->gap) {
             foreach ($replay->messages as $encoded) {
-                $seq = $this->decodeEnvelope($encoded)['seq'] ?? null;
+                $envelope = $this->decodeEnvelope($encoded);
+                $seq = $envelope['seq'] ?? null;
                 if (is_int($seq) && $seq > $subscription->lastSeq) {
                     $subscription->lastSeq = $seq;
-                    $this->sendText($connection, $encoded);
+                    // The subscription was authorized just now, so a replayed reauthorization request is moot.
+                    if (! self::isReauthorize($envelope)) {
+                        $this->sendText($connection, $encoded);
+                    }
                 }
             }
         }
@@ -604,6 +609,12 @@ final class Server
             $this->channelSeq[$key] = $seq;
         }
 
+        if (self::isReauthorize($envelope)) {
+            $this->reauthorize($key, $connections, $seq);
+
+            return;
+        }
+
         $frame = FrameCodec::encode(Opcode::Text, $payload);
         foreach ($connections as $connection) {
             if ($except !== null && $connection->id === $except) {
@@ -622,6 +633,61 @@ final class Server
             }
             $this->send($connection, $frame);
         }
+    }
+
+    /**
+     * Re-runs channel authorization for every local subscription of the channel and drops those that no
+     * longer pass, exactly as an unsubscribe would (presence leave included). The request itself is
+     * never forwarded to clients.
+     *
+     * Every subscription is checked regardless of its sequence position: one authorized while the request
+     * was in flight may already count it as seen.
+     *
+     * @param  array<int, Connection>  $connections
+     */
+    private function reauthorize(string $key, array $connections, ?int $seq): void
+    {
+        foreach ($connections as $connection) {
+            $subscription = $connection->subscriptions[$key] ?? null;
+            $ticket = $connection->ticket;
+            if ($subscription === null || $ticket === null) {
+                continue;
+            }
+            if ($seq !== null && $seq > $subscription->lastSeq) {
+                // Same position bookkeeping as a delivered event, so later deliveries and replays dedupe correctly.
+                $subscription->lastSeq = $seq;
+            }
+
+            try {
+                $result = $this->authorizer->authorize($ticket, $subscription->name);
+                $allowed = $result->allowed;
+                $reason = $result->reason;
+            } catch (Throwable $e) {
+                $this->log('error', "Reauthorization on {$key} failed: ".$e->getMessage());
+                $allowed = false;
+                $reason = 'error';
+            }
+            if ($allowed) {
+                continue;
+            }
+            if ($reason === 'error') {
+                // The authorizer already reported the exception; note the consequence in the server log.
+                $this->log('warning', "Reauthorization on {$key} failed, subscription dropped");
+            }
+
+            $this->leave($connection, $subscription);
+            $this->sendText($connection, ServerMessage::error(null, 'revoked', 'Subscription revoked: '.$reason, $subscription->name));
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $envelope
+     */
+    private static function isReauthorize(?array $envelope): bool
+    {
+        return $envelope !== null
+            && ($envelope['type'] ?? null) === 'event'
+            && ($envelope['event'] ?? null) === RealtimeManager::REAUTHORIZE;
     }
 
     /**

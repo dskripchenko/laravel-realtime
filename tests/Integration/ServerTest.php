@@ -34,6 +34,9 @@ final class ServerTest extends TestCase
 
     private static string $log = '';
 
+    /** @var list<string> access flag files to remove after the test */
+    private array $flags = [];
+
     protected static function redisPrefix(): string
     {
         return self::$prefix;
@@ -61,6 +64,15 @@ final class ServerTest extends TestCase
             }
         }
         parent::tearDownAfterClass();
+    }
+
+    protected function tearDown(): void
+    {
+        foreach ($this->flags as $flag) {
+            @unlink($flag);
+        }
+        $this->flags = [];
+        parent::tearDown();
     }
 
     protected function defineEnvironment($app): void
@@ -231,6 +243,90 @@ final class ServerTest extends TestCase
         $ann->close();
     }
 
+    public function test_reauthorize_drops_revoked_subscriptions_and_keeps_allowed_ones(): void
+    {
+        $channel = 'private-revocable.'.$this->uniqueId();
+        $ann = $this->connect(1);
+        $bob = $this->connect(2);
+        foreach ([$ann, $bob] as $client) {
+            $client->sendJson(['type' => 'subscribe', 'id' => 1, 'channel' => $channel]);
+            $this->assertSame('ack', $client->receiveJson()['type'] ?? null);
+        }
+
+        $this->revoke($channel, 1);
+        $this->assertSame(1, Realtime::reauthorize($channel));
+
+        $this->assertSame(
+            ['type' => 'error', 'channel' => $channel, 'code' => 'revoked', 'message' => 'Subscription revoked: forbidden'],
+            $ann->receiveJson(),
+        );
+
+        Realtime::publish($channel, 'After', ['x' => 1]);
+        $this->assertSame(
+            ['seq' => 2, 'type' => 'event', 'channel' => $channel, 'event' => 'After', 'data' => ['x' => 1]],
+            $bob->receiveJson(),
+            'the control event is not delivered; allowed subscriptions keep receiving',
+        );
+        $this->assertNull($ann->receiveJson(0.3), 'the dropped subscription receives nothing more');
+
+        $ann->sendJson(['type' => 'subscribe', 'id' => 2, 'channel' => $channel]);
+        $this->assertSame('forbidden', $ann->receiveJson()['code'] ?? null);
+
+        // Replay skips the control event too.
+        $carl = $this->connect(3);
+        $carl->sendJson(['type' => 'subscribe', 'id' => 1, 'channel' => $channel, 'since' => 0]);
+        $this->assertSame(['type' => 'ack', 'id' => 1, 'channel' => $channel, 'seq' => 2, 'gap' => false], $carl->receiveJson());
+        $this->assertSame(['After', 2], [($e = $carl->receiveJson())['event'] ?? null, $e['seq'] ?? null]);
+        $this->assertNull($carl->receiveJson(0.3));
+
+        foreach ([$ann, $bob, $carl] as $client) {
+            $client->close();
+        }
+    }
+
+    public function test_reauthorize_publishes_presence_leave_for_a_dropped_member(): void
+    {
+        $channel = 'presence-room.'.$this->uniqueId();
+        $ann = $this->connect(1);
+        $ann->sendJson(['type' => 'subscribe', 'id' => 1, 'channel' => $channel]);
+        $this->assertSame('ack', $ann->receiveJson()['type'] ?? null);
+        $bob = $this->connect(2);
+        $bob->sendJson(['type' => 'subscribe', 'id' => 1, 'channel' => $channel]);
+        $this->assertCount(2, ($bob->receiveJson() ?? [])['members'] ?? []);
+        $ann->waitFor(static fn (array $m): bool => ($m['action'] ?? null) === 'join' && ($m['member']['id'] ?? null) === 2);
+
+        $this->revoke($channel, 2);
+        Realtime::reauthorize($channel);
+
+        $error = $bob->waitFor(static fn (array $m): bool => ($m['type'] ?? null) === 'error');
+        $this->assertSame(['revoked', $channel], [$error['code'] ?? null, $error['channel'] ?? null]);
+        $leave = $ann->waitFor(static fn (array $m): bool => ($m['action'] ?? null) === 'leave');
+        $this->assertSame(['id' => 2, 'info' => ['name' => 'User 2']], $leave['member']);
+
+        $ann->sendJson(['type' => 'presence', 'id' => 5, 'channel' => $channel, 'action' => 'list']);
+        $list = $ann->waitFor(static fn (array $m): bool => ($m['id'] ?? null) === 5);
+        $this->assertSame([1], array_column($list['members'], 'id'));
+
+        $ann->close();
+        $bob->close();
+    }
+
+    public function test_reauthorize_treats_a_failing_check_as_denied(): void
+    {
+        $channel = 'private-revocable.'.$this->uniqueId();
+        $client = $this->connect(1);
+        $client->sendJson(['type' => 'subscribe', 'id' => 1, 'channel' => $channel]);
+        $this->assertSame('ack', $client->receiveJson()['type'] ?? null);
+
+        $this->revoke($channel, 1, 'throw');
+        Realtime::reauthorize($channel);
+
+        $this->assertSame(['revoked', 'Subscription revoked: error'], [($e = $client->receiveJson())['code'] ?? null, $e['message'] ?? null]);
+        $client->sendJson(['type' => 'ping', 'id' => 'alive']);
+        $this->assertSame(['type' => 'pong', 'id' => 'alive'], $client->receiveJson(), 'the server keeps running');
+        $client->close();
+    }
+
     public function test_client_events_are_rejected_on_public_channels(): void
     {
         $client = $this->connect(1);
@@ -368,6 +464,22 @@ final class ServerTest extends TestCase
         $this->assertTrue($body['redis']);
 
         $this->assertStringStartsWith('HTTP/1.1 404', WebSocketClient::http('127.0.0.1', self::$port, "GET /nope HTTP/1.1\r\n\r\n"));
+    }
+
+    private function uniqueId(): string
+    {
+        return bin2hex(random_bytes(4));
+    }
+
+    /**
+     * Revokes the user's access to a revocable channel of the workbench app (see WorkbenchServiceProvider).
+     */
+    private function revoke(string $channel, int $userId, string $mode = 'deny'): void
+    {
+        $id = substr($channel, (int) strrpos($channel, '.') + 1);
+        $flag = sys_get_temp_dir().'/realtime-revoked-'.$id.'-'.$userId;
+        file_put_contents($flag, $mode);
+        $this->flags[] = $flag;
     }
 
     private function connect(int $userId, string $scope = ''): WebSocketClient
