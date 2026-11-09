@@ -35,6 +35,74 @@ Route::middleware(['api', 'auth:sanctum'])->post('/api/realtime/ticket', functio
 });
 ```
 
+### Claims and expiry
+
+A ticket issued for an API token rather than a browser session usually has to carry more
+than the user: what the token may do, and when it stops being valid. `issueTicket()` takes
+both:
+
+```php
+Realtime::issueTicket(
+    Authenticatable $user,
+    ?string $guard = null,
+    ?string $scope = null,
+    ?Request $request = null,
+    array $claims = [],          // array<string, mixed>, JSON-safe, yours to define
+    ?int $expiresAt = null,      // unix seconds; the connection ends then
+): IssuedTicket
+```
+
+```php
+$token = $request->user()->currentAccessToken();
+
+return Realtime::issueTicket($request->user(), 'sanctum', request: $request,
+    claims: ['token' => $token->id, 'abilities' => $token->abilities],
+    expiresAt: $token->expires_at?->getTimestamp(),
+);
+```
+
+- **Claims** travel with the ticket and stay on the connection as `Ticket::$claims`. The
+  package does not interpret them. Use them in `authorizeUsing()` (see below) to limit what
+  the connection may subscribe to, and in `disconnect()` to find the connection again.
+  Claim names must be strings; values must survive `json_encode()`/`json_decode()`
+  unchanged (scalars, `null`, arrays; no objects). Integer-like names such as `"7"` are not
+  allowed, because PHP turns them into integer keys.
+- **Expiry** (`expiresAt`, `Ticket::$expiresAt`) is when the connection must end, not the
+  ticket's own TTL (`ticket.ttl` still limits how long the ticket can be redeemed). It must
+  be in the future, otherwise `issueTicket()` throws `InvalidArgumentException`. The server
+  rejects an already expired ticket at the upgrade with 401, and checks open connections
+  once a second: when the time has come, the client gets
+  `{"type":"error","code":"expired","message":"Ticket expired"}` and a close with code 1008.
+  Subscriptions end as on any close (presence `leave` included). `Ticket::expired(?int $now = null)`
+  tells whether a ticket has expired.
+- Tickets stored by an older version (no claims, no expiry) are still accepted.
+
+### Disconnecting by claims (`disconnect`)
+
+When the token behind a connection is revoked, close every connection opened with it:
+
+```php
+Realtime::disconnect(['token' => $token->id]);                  // current scope
+Realtime::disconnect(['token' => $token->id], scope: 'acme');   // explicit scope
+```
+
+```php
+Realtime::disconnect(array $claims, ?string $scope = null): void
+```
+
+- Every server closes its open connections in the scope (the current scope by default,
+  resolved as for `publish()`) whose ticket claims contain **all** the given pairs, compared
+  strictly (`===`): `['token' => 5]` does not match a ticket with `['token' => '5']`.
+- The clients get `{"type":"error","code":"revoked","message":"Connection revoked"}` and a
+  close with code 1008. Subscriptions end as on any close.
+- An empty `$claims` throws `InvalidArgumentException`: the call can never close every
+  connection by accident.
+- The request travels over a reserved control channel of the broker
+  (`RealtimeManager::CONTROL_KEY`) that every server subscribes to and that clients can
+  neither subscribe to nor receive. It is not stored for replay: only connections open at
+  that moment are closed. Stop issuing tickets for the token first, then call
+  `disconnect()`.
+
 ## Scopes
 
 ```php
@@ -117,7 +185,9 @@ Realtime::authorizeUsing(function (Ticket $ticket, Closure $next): mixed {
 
 The hook:
 
-- receives the `Ticket` (`userId`, `guard`, `scope`, `issuedAt`);
+- receives the `Ticket` (`userId`, `guard`, `scope`, `issuedAt`, `claims`, `expiresAt`), so
+  it can refuse by claims as well, or make them available to the channel callbacks for
+  the duration of `$next()`;
 - must return what `$next()` returns, or `false` to refuse without calling it (for example,
   when the ticket's tenant no longer exists or is suspended);
 - runs once per subscription;
@@ -176,3 +246,5 @@ How it works and what to expect:
 - Revoking access does not drop existing subscriptions by itself. Authorization is checked
   when a client subscribes. Call `Realtime::reauthorize($channel)` after the change to make
   the servers check existing subscriptions again (see above).
+- For tickets issued for tokens, pass the token's expiry as `expiresAt`, and call
+  `Realtime::disconnect()` with the token's claims when it is revoked.

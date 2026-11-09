@@ -6,6 +6,30 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-09
+
+### Added
+
+- Ticket claims and expiry. `Ticket` gains `array $claims` (host-defined, JSON-safe,
+  string keys) and `?int $expiresAt` (unix seconds, the end of the connection), plus
+  `expired(?int $now = null): bool`. `toArray()` adds `claims` and `exp`; `fromJson()`
+  still accepts tickets without them and rejects malformed ones.
+- `Realtime::issueTicket()` takes `array $claims = []` and `?int $expiresAt = null` after
+  `$request`. An expiry that is not in the future, or claims without string keys, throw
+  `InvalidArgumentException`. Claims reach `authorizeUsing()` through the `Ticket`.
+- The server refuses an expired ticket at the upgrade (401) and, in its once-a-second
+  maintenance, ends an open connection whose ticket expired:
+  `{"type":"error","code":"expired","message":"Ticket expired"}`, then close code 1008,
+  with the usual cleanup (presence `leave` included).
+- `Realtime::disconnect(array $claims, ?string $scope = null): void` closes, on every
+  server, the open connections of the scope (current scope by default) whose ticket claims
+  contain all the given pairs (strict comparison). Clients get
+  `{"type":"error","code":"revoked","message":"Connection revoked"}` and close code 1008.
+  Empty claims throw `InvalidArgumentException`. The request is a volatile message on a
+  reserved broker control channel (`RealtimeManager::CONTROL_KEY`, `#realtime:control`)
+  that every server subscribes to on connect and again after a Redis reconnect; it is
+  never subscribable by or forwarded to clients. Servers that predate it ignore it.
+
 ## [0.2.0] - 2026-11-09
 
 ### Added
@@ -55,6 +79,7 @@ All notable changes to this project are documented in this file. The format foll
 - Redis Cluster and predis.
 - UI kit adapter for `@dskripchenko/ui` components.
 
-[Unreleased]: https://github.com/dskripchenko/laravel-realtime/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/dskripchenko/laravel-realtime/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/dskripchenko/laravel-realtime/releases/tag/v0.3.0
 [0.2.0]: https://github.com/dskripchenko/laravel-realtime/releases/tag/v0.2.0
 [0.1.0]: https://github.com/dskripchenko/laravel-realtime/releases/tag/v0.1.0

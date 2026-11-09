@@ -201,13 +201,15 @@ laden und bei `seq` weitermachen.
 | `unknown_type` | Nicht unterstützter `type` |
 | `bad_channel` | Ungültiger Channel-Name |
 | `forbidden` | Autorisierung verweigert oder Client-Ereignis nicht erlaubt |
-| `revoked` | Ein bestehendes Abonnement wurde nach erneuter Autorisierung entfernt (ohne `id`) |
+| `revoked` | Ein bestehendes Abonnement wurde nach erneuter Autorisierung entfernt (ohne `id`, mit `channel`), oder die ganze Verbindung wurde widerrufen (ohne `id` und `channel`; der Close folgt) |
+| `expired` | Das Ticket ist abgelaufen (ohne `id` und `channel`; der Close folgt) |
 | `not_subscribed` | `presence`/`event` auf einem Channel, den die Verbindung nicht abonniert hat |
 | `limit` | Zu viele Abonnements |
 | `unavailable` | Redis vorübergehend nicht verfügbar |
 | `internal` | Unerwarteter Serverfehler (wird geloggt) |
 
-Fehler schließen die Verbindung nie.
+Fehler schließen die Verbindung nie, außer den beiden verbindungsweiten Fehlern unten
+(`revoked` ohne `channel` und `expired`).
 
 ### revoked
 
@@ -219,6 +221,20 @@ Ein Fehler ohne `id` mit dem Code `revoked` bedeutet: Die App hat den Server geb
 Channel erneut zu prüfen (`Realtime::reauthorize()`), und der Callback erlaubt das
 Abonnement nicht mehr. Das Abonnement ist wie nach `unsubscribe` beendet; in einem
 Presence-Channel erhalten die anderen Mitglieder `leave`.
+
+### Verbindung widerrufen oder abgelaufen
+
+```json
+{"type":"error","code":"revoked","message":"Connection revoked"}
+{"type":"error","code":"expired","message":"Ticket expired"}
+```
+
+Ohne `channel` beenden diese Fehler die ganze Verbindung: Es folgt ein Close mit Code 1008.
+`revoked` bedeutet, dass die App die mit bestimmten Ticket-Claims geöffneten Verbindungen
+geschlossen hat (`Realtime::disconnect()`), etwa weil das API-Token dahinter widerrufen
+wurde. `expired` bedeutet, dass der Ablaufzeitpunkt des Tickets erreicht ist. Eine neue
+Verbindung braucht ein neues Ticket; ob der Client eines bekommt, entscheidet der
+Ticket-Endpunkt.
 
 ## Keepalive
 
@@ -237,7 +253,7 @@ Presence-Channel erhalten die anderen Mitglieder `leave`.
 | 1002 | Protokollfehler (unmaskierter Frame, falscher Opcode, RSV-Bits, falsche Fortsetzung, falscher Close-Payload) |
 | 1003 | Binärnachricht |
 | 1007 | Textnachricht ist kein gültiges UTF-8 |
-| 1008 | Ratenlimit (`limits.messages_per_second`) überschritten |
+| 1008 | Ratenlimit (`limits.messages_per_second`) überschritten; Ticket abgelaufen; Verbindung per `Realtime::disconnect()` widerrufen |
 | 1009 | Frame oder Nachricht größer als die Limits |
 | 4000 | Keepalive-Timeout |
 | 4008 | Langsamer Konsument: mehr als `limits.max_buffer` Bytes warten auf Versand |

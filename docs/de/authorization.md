@@ -35,6 +35,78 @@ Route::middleware(['api', 'auth:sanctum'])->post('/api/realtime/ticket', functio
 });
 ```
 
+### Claims und Ablauf
+
+Ein Ticket, das für ein API-Token statt für eine Browser-Session ausgestellt wird, muss
+meist mehr tragen als den Benutzer: was das Token darf und wann es ungültig wird.
+`issueTicket()` nimmt beides an:
+
+```php
+Realtime::issueTicket(
+    Authenticatable $user,
+    ?string $guard = null,
+    ?string $scope = null,
+    ?Request $request = null,
+    array $claims = [],          // array<string, mixed>, JSON-tauglich, von der App definiert
+    ?int $expiresAt = null,      // Unix-Sekunden; dann endet die Verbindung
+): IssuedTicket
+```
+
+```php
+$token = $request->user()->currentAccessToken();
+
+return Realtime::issueTicket($request->user(), 'sanctum', request: $request,
+    claims: ['token' => $token->id, 'abilities' => $token->abilities],
+    expiresAt: $token->expires_at?->getTimestamp(),
+);
+```
+
+- **Claims** reisen mit dem Ticket und bleiben als `Ticket::$claims` an der Verbindung.
+  Das Paket interpretiert sie nicht. Nutzen Sie sie in `authorizeUsing()` (siehe unten),
+  um einzuschränken, was die Verbindung abonnieren darf, und in `disconnect()`, um die
+  Verbindung wiederzufinden. Claim-Namen sind Strings; Werte müssen
+  `json_encode()`/`json_decode()` unverändert überstehen (Skalare, `null`, Arrays; keine
+  Objekte). Namen wie `"7"` sind nicht erlaubt, weil PHP sie zu Integer-Schlüsseln macht.
+- **Ablauf** (`expiresAt`, `Ticket::$expiresAt`) ist der Zeitpunkt, an dem die Verbindung
+  enden muss, nicht die TTL des Tickets selbst (`ticket.ttl` begrenzt weiterhin, wie lange
+  das Ticket eingelöst werden kann). Er muss in der Zukunft liegen, sonst wirft
+  `issueTicket()` eine `InvalidArgumentException`. Ein bereits abgelaufenes Ticket lehnt
+  der Server beim Upgrade mit 401 ab, offene Verbindungen prüft er einmal pro Sekunde: Ist
+  die Zeit gekommen, erhält der Client
+  `{"type":"error","code":"expired","message":"Ticket expired"}` und einen Close mit Code
+  1008. Abonnements enden wie bei jedem Close (Presence-`leave` eingeschlossen).
+  `Ticket::expired(?int $now = null)` sagt, ob ein Ticket abgelaufen ist.
+- Von einer älteren Version gespeicherte Tickets (ohne Claims und Ablauf) werden weiterhin
+  akzeptiert.
+
+### Trennen nach Claims (`disconnect`)
+
+Wird das Token hinter einer Verbindung widerrufen, schließen Sie alle damit geöffneten
+Verbindungen:
+
+```php
+Realtime::disconnect(['token' => $token->id]);                  // aktueller Scope
+Realtime::disconnect(['token' => $token->id], scope: 'acme');   // expliziter Scope
+```
+
+```php
+Realtime::disconnect(array $claims, ?string $scope = null): void
+```
+
+- Jeder Server schließt seine offenen Verbindungen im Scope (standardmäßig der aktuelle,
+  aufgelöst wie bei `publish()`), deren Ticket-Claims **alle** angegebenen Paare enthalten,
+  strikt verglichen (`===`): `['token' => 5]` passt nicht zu einem Ticket mit
+  `['token' => '5']`.
+- Die Clients erhalten `{"type":"error","code":"revoked","message":"Connection revoked"}`
+  und einen Close mit Code 1008. Abonnements enden wie bei jedem Close.
+- Leere `$claims` werfen eine `InvalidArgumentException`: Der Aufruf kann nie versehentlich
+  alle Verbindungen schließen.
+- Die Anfrage läuft über einen reservierten Steuerkanal des Brokers
+  (`RealtimeManager::CONTROL_KEY`), den jeder Server abonniert und den Clients weder
+  abonnieren noch empfangen können. Sie wird nicht für Replay gespeichert: Nur die in
+  diesem Moment offenen Verbindungen werden geschlossen. Stellen Sie zuerst keine Tickets
+  mehr für das Token aus und rufen Sie dann `disconnect()` auf.
+
 ## Scopes
 
 ```php
@@ -116,7 +188,9 @@ Realtime::authorizeUsing(function (Ticket $ticket, Closure $next): mixed {
 
 Der Hook:
 
-- erhält das `Ticket` (`userId`, `guard`, `scope`, `issuedAt`);
+- erhält das `Ticket` (`userId`, `guard`, `scope`, `issuedAt`, `claims`, `expiresAt`) und
+  kann daher auch nach Claims ablehnen oder sie den Channel-Callbacks für die Dauer von
+  `$next()` bereitstellen;
 - muss zurückgeben, was `$next()` zurückgibt, oder `false`, um ohne Aufruf abzulehnen (etwa
   wenn der Mandant des Tickets nicht mehr existiert oder gesperrt ist);
 - läuft einmal pro Abonnement;

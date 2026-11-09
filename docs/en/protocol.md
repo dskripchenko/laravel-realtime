@@ -194,13 +194,15 @@ buffer covers. The client should reload its state and continue from `seq`.
 | `unknown_type` | Unsupported `type` |
 | `bad_channel` | Invalid channel name |
 | `forbidden` | Authorization denied, or client event not allowed |
-| `revoked` | An existing subscription was removed after reauthorization (no `id`) |
+| `revoked` | An existing subscription was removed after reauthorization (no `id`, with `channel`), or the whole connection was revoked (no `id`, no `channel`; the close follows) |
+| `expired` | The ticket's expiry has passed (no `id`, no `channel`; the close follows) |
 | `not_subscribed` | `presence`/`event` on a channel the connection has not subscribed to |
 | `limit` | Too many subscriptions |
 | `unavailable` | Redis temporarily unavailable |
 | `internal` | Unexpected server error (logged) |
 
-Errors never close the connection.
+Errors never close the connection, except the two connection-level ones below
+(`revoked` without `channel`, and `expired`).
 
 ### revoked
 
@@ -213,6 +215,19 @@ subscription because the app asked it to check the channel again
 (`Realtime::reauthorize()`) and the channel callback no longer allows it. The subscription
 is gone as after `unsubscribe`: no further events arrive, and on a presence channel the
 other members get `leave`. Subscribing again runs the callback again.
+
+### Connection revoked or expired
+
+```json
+{"type":"error","code":"revoked","message":"Connection revoked"}
+{"type":"error","code":"expired","message":"Ticket expired"}
+```
+
+Without `channel`, these end the whole connection: a close frame with code 1008 follows.
+`revoked` means the app closed the connections opened with certain ticket claims
+(`Realtime::disconnect()`), for example because the API token behind them was revoked.
+`expired` means the expiry the ticket was issued with has passed. A new connection needs a
+new ticket; the ticket endpoint decides whether the client still gets one.
 
 ## Keepalive
 
@@ -231,7 +246,7 @@ other members get `leave`. Subscribing again runs the callback again.
 | 1002 | Protocol error (unmasked frame, bad opcode, RSV bits, bad continuation, bad close payload) |
 | 1003 | Binary message |
 | 1007 | Text message is not valid UTF-8 |
-| 1008 | Rate limit (`limits.messages_per_second`) exceeded |
+| 1008 | Rate limit (`limits.messages_per_second`) exceeded; ticket expired; connection revoked by `Realtime::disconnect()` |
 | 1009 | Frame or message larger than the limits |
 | 4000 | Keepalive timeout |
 | 4008 | Slow consumer: more than `limits.max_buffer` bytes are waiting to be sent |

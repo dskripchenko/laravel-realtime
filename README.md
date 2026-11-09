@@ -102,6 +102,36 @@ const page = realtime.join('page.7');
 page.onMembers((members) => showEditors(members));
 ```
 
+## Tickets for API tokens: claims, expiry, disconnect
+
+A ticket can carry host-defined claims and an expiry, so a connection opened for an API
+token knows what the token may do, ends when the token expires, and can be closed when the
+token is revoked:
+
+```php
+$token = $request->user()->currentAccessToken();
+
+return Realtime::issueTicket($request->user(), 'sanctum', request: $request,
+    claims: ['token' => $token->id, 'abilities' => $token->abilities], // array<string, mixed>, JSON-safe
+    expiresAt: $token->expires_at?->getTimestamp(),                     // unix seconds, must be in the future
+);
+
+// The claims are on the ticket the authorization hook receives:
+Realtime::authorizeUsing(fn (Ticket $ticket, Closure $next) => /* check $ticket->claims */ $next());
+
+// Revoked: close every open connection whose claims contain all these pairs (strict comparison).
+Realtime::disconnect(['token' => $token->id]);          // current scope; empty claims throw
+```
+
+- An expired ticket is refused at the upgrade (401). An open connection whose expiry has
+  passed gets `{"type":"error","code":"expired"}` and close code 1008.
+- `disconnect()` reaches every server over a reserved broker control channel
+  (`RealtimeManager::CONTROL_KEY`) that clients cannot subscribe to. The affected clients
+  get `{"type":"error","code":"revoked"}` and close code 1008. Presence `leave` and the rest
+  of the cleanup happen as on any close.
+
+Details: [Authorization & tenancy](docs/en/authorization.md#claims-and-expiry).
+
 ## Protocol at a glance
 
 ```text
@@ -143,6 +173,8 @@ web / queue workers ──EVAL publish──▶ Redis/Valkey ──pub/sub──
 - Authorization is checked on subscribe. After revoking access, call
   `Realtime::reauthorize($channel)`: the servers re-check existing subscriptions and drop
   the ones that no longer pass.
+- Connections live until they close. For tickets issued for tokens, pass the token's
+  expiry as `expiresAt` and call `Realtime::disconnect($claims)` when the token is revoked.
 - Channel callbacks run in a long-lived process. They must not use request state such as
   `request()`, the session or `auth()->user()`. They receive the user from the ticket.
 

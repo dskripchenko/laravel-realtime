@@ -304,7 +304,7 @@ final class Server
             $this->log('error', 'Ticket lookup failed: '.$e->getMessage());
             throw new HandshakeException(503, 'Ticket store unavailable');
         }
-        if ($ticket === null || ! ChannelName::isValidScope($ticket->scope)) {
+        if ($ticket === null || ! ChannelName::isValidScope($ticket->scope) || $ticket->expired()) {
             throw new HandshakeException(401, 'Invalid or expired ticket');
         }
 
@@ -584,9 +584,42 @@ final class Server
         }
         foreach ($messages as [$channel, $payload]) {
             $key = $this->broker->keyFromPubsubChannel($channel);
-            if ($key !== null) {
+            if ($key === RealtimeManager::CONTROL_KEY) {
+                $this->control($payload);
+            } elseif ($key !== null) {
                 $this->dispatch($key, $payload);
             }
+        }
+    }
+
+    /**
+     * Handles a message of the control channel. Control messages are never forwarded to clients.
+     */
+    private function control(string $payload): void
+    {
+        $message = $this->decodeEnvelope($payload);
+        if ($message === null || ($message['type'] ?? null) !== 'disconnect') {
+            return;
+        }
+        $scope = $message['scope'] ?? null;
+        $claims = $message['claims'] ?? null;
+        // An empty claims map would match every connection; never act on it.
+        if (! is_string($scope) || ! Ticket::isValidClaims($claims) || $claims === []) {
+            return;
+        }
+
+        $closed = 0;
+        foreach ($this->connections as $connection) {
+            $ticket = $connection->ticket;
+            if ($connection->state !== ConnectionState::Open || $ticket === null || $ticket->scope !== $scope || ! $ticket->matches($claims)) {
+                continue;
+            }
+            $this->sendText($connection, ServerMessage::error(null, 'revoked', 'Connection revoked'));
+            $this->close($connection, CloseCode::POLICY_VIOLATION, 'Revoked');
+            $closed++;
+        }
+        if ($closed > 0) {
+            $this->log('info', "Disconnected {$closed} connection(s) by claims");
         }
     }
 
@@ -708,6 +741,8 @@ final class Server
     {
         try {
             $this->subscriber->connect();
+            // Tracked by the subscriber from now on, so connect() re-subscribes it after a reconnect.
+            $this->subscriber->subscribe($this->broker->pubsubChannel(RealtimeManager::CONTROL_KEY));
             $this->subscriberBackoff = 0.5;
             $this->subscriberLastData = microtime(true);
             $this->log('info', 'Connected to Redis pub/sub');
@@ -765,7 +800,8 @@ final class Server
                 ConnectionState::Handshake => $now - $connection->connectedAt > $this->options->handshakeTimeout
                     ? $this->drop($connection) : null,
                 ConnectionState::Closing => $now > ($connection->closeDeadline ?? 0.0) ? $this->drop($connection) : null,
-                ConnectionState::Open => $this->keepalive($connection, $now),
+                ConnectionState::Open => $connection->ticket?->expired((int) $now) === true
+                    ? $this->expire($connection) : $this->keepalive($connection, $now),
             };
         }
 
@@ -805,6 +841,15 @@ final class Server
         } catch (Throwable $e) {
             $this->log('error', 'Maintenance failed: '.$e->getMessage());
         }
+    }
+
+    /**
+     * Ends a connection whose ticket expired, the same way as any other server-side close.
+     */
+    private function expire(Connection $connection): void
+    {
+        $this->sendText($connection, ServerMessage::error(null, 'expired', 'Ticket expired'));
+        $this->close($connection, CloseCode::POLICY_VIOLATION, 'Ticket expired');
     }
 
     private function keepalive(Connection $connection, float $now): void

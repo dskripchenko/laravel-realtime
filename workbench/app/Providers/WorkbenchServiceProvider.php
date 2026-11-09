@@ -31,17 +31,20 @@ final class WorkbenchServiceProvider extends ServiceProvider
 
         // Stands in for "enter the tenant": channel callbacks can see which scope they run for.
         Realtime::authorizeUsing(static function (Ticket $ticket, Closure $next): mixed {
-            $previous = $GLOBALS['realtime_scope'] ?? null;
+            $previous = [$GLOBALS['realtime_scope'] ?? null, $GLOBALS['realtime_claims'] ?? null];
             $GLOBALS['realtime_scope'] = $ticket->scope;
+            $GLOBALS['realtime_claims'] = $ticket->claims;
             try {
                 return $next();
             } finally {
-                $GLOBALS['realtime_scope'] = $previous;
+                [$GLOBALS['realtime_scope'], $GLOBALS['realtime_claims']] = $previous;
             }
         });
 
         Realtime::channel('board.{id}', static fn (Authenticatable $user, string $id): bool => $id !== '13');
         Realtime::channel('tenant-only.{scope}', static fn (Authenticatable $user, string $scope): bool => ($GLOBALS['realtime_scope'] ?? null) === $scope);
+        // Only connections whose ticket claims list the ability may subscribe.
+        Realtime::channel('ability.{name}', static fn (Authenticatable $user, string $name): bool => in_array($name, (array) (($GLOBALS['realtime_claims'] ?? [])['abilities'] ?? []), true));
         Realtime::channel('page.{id}', static fn (Authenticatable $user, string $id): array => ['name' => 'User '.$user->getAuthIdentifier()]);
 
         // Access the tests can revoke at runtime: a flag file per channel id and user ("throw" makes the callback fail).
