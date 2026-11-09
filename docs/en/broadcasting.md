@@ -95,6 +95,10 @@ Realtime::publish('private-job.91', 'progress', ['done' => 40, 'total' => 100], 
 scopes, and when Redis is unavailable. Inside the broadcaster, these errors become
 `BroadcastException`.
 
+After access to a channel changed, `Realtime::reauthorize($channel)` makes the servers check
+the existing subscriptions again and drop the ones that no longer pass (see
+[authorization](authorization.md#revoking-access-reauthorize)).
+
 The same is available from the shell:
 
 ```bash

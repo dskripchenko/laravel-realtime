@@ -1,6 +1,6 @@
 {
   "name": "@dskripchenko/realtime",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Browser client for dskripchenko/laravel-realtime: tickets, reconnect with backoff, replay by sequence number, presence. Zero runtime dependencies.",
   "license": "MIT",
   "author": "Denis Skripchenko <denskrp90@gmail.com>",

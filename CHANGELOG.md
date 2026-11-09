@@ -6,6 +6,21 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-09
+
+### Added
+
+- `Realtime::reauthorize(string $channel, ?string $scope = null): int` makes the servers run
+  the channel callbacks again (through `authorizeUsing()`) for existing subscriptions of the
+  channel and drop the ones that no longer pass, as an unsubscribe would (presence `leave`
+  included). Dropped clients get `{"type":"error","channel":…,"code":"revoked"}`. The request
+  is an ordinary event with the reserved name `realtime:reauthorize`
+  (`RealtimeManager::REAUTHORIZE`), consumed by the server and never forwarded, so it needs
+  no broker or protocol change; older servers forward it as a regular event.
+- JS client: `Channel.onRevoked()`; a revoked channel is marked as not subscribed and a
+  presence channel's member list is cleared. The `realtime:reauthorize` event is hidden from
+  handlers. `REAUTHORIZE_EVENT` is exported.
+
 ## [0.1.0] - 2026-10-27
 
 ### Added
@@ -40,5 +55,6 @@ All notable changes to this project are documented in this file. The format foll
 - Redis Cluster and predis.
 - UI kit adapter for `@dskripchenko/ui` components.
 
-[Unreleased]: https://github.com/dskripchenko/laravel-realtime/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/dskripchenko/laravel-realtime/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dskripchenko/laravel-realtime/releases/tag/v0.2.0
 [0.1.0]: https://github.com/dskripchenko/laravel-realtime/releases/tag/v0.1.0

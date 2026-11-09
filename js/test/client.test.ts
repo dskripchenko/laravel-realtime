@@ -292,12 +292,48 @@ describe('channels', () => {
 
   it('routes subscription errors to the channel', async () => {
     const { client } = await connected();
-    const secret = client.private('board.13');
+    const denied = client.private('board.13');
     const errors: string[] = [];
-    secret.onError((e) => errors.push(e.code));
+    denied.onError((e) => errors.push(e.code));
     FakeSocket.last().push({ type: 'error', id: 1, channel: 'private-board.13', code: 'forbidden', message: 'no' });
     expect(errors).toEqual(['forbidden']);
-    expect(secret.subscribed).toBe(false);
+    expect(denied.subscribed).toBe(false);
+  });
+
+  it('marks a revoked subscription as ended and reports it', async () => {
+    const { client } = await connected({ reconnect: { initialDelay: 10, jitter: 0 } });
+    const board = client.private('board.1');
+    let socket = FakeSocket.last();
+    socket.push({ type: 'ack', id: 1, channel: 'private-board.1', seq: 3, gap: false });
+    const revoked: string[] = [];
+    const errors: string[] = [];
+    board.onRevoked((e) => revoked.push(e.message));
+    board.onError((e) => errors.push(e.code));
+
+    socket.push({ type: 'error', channel: 'private-board.1', code: 'revoked', message: 'Subscription revoked: forbidden' });
+    expect(revoked).toEqual(['Subscription revoked: forbidden']);
+    expect(errors).toEqual(['revoked']);
+    expect(board.subscribed).toBe(false);
+    expect(client.subscribe('private-board.1')).toBe(board);
+
+    socket.drop();
+    await vi.advanceTimersByTimeAsync(10);
+    socket = FakeSocket.last();
+    socket.accept();
+    expect(socket.sentOfType('subscribe')).toEqual([{ type: 'subscribe', id: 2, channel: 'private-board.1', since: 3 }]);
+  });
+
+  it('hides the reauthorization request forwarded by older servers', async () => {
+    const { client } = await connected();
+    const news = client.subscribe('news');
+    const socket = FakeSocket.last();
+    socket.push({ type: 'ack', id: 1, channel: 'news', seq: 0, gap: false });
+    const seen: string[] = [];
+    news.onAny((event) => seen.push(event));
+    socket.push({ type: 'event', seq: 1, channel: 'news', event: 'realtime:reauthorize', data: [] });
+    socket.push({ type: 'event', seq: 2, channel: 'news', event: 'E', data: null });
+    expect(seen).toEqual(['E']);
+    expect(news.lastSeq).toBe(2);
   });
 
   it('unsubscribes and stops dispatching', async () => {
@@ -373,6 +409,18 @@ describe('presence', () => {
     expect(socket.sentOfType('presence')).toEqual([{ type: 'presence', id: 2, channel: 'presence-page.1', action: 'list' }]);
     socket.push({ type: 'presence', id: 2, channel: 'presence-page.1', action: 'list', members: [{ id: 3, info: { name: 'Cy' } }] });
     expect(page.members()).toEqual([{ id: 3, info: { name: 'Cy' } }]);
+  });
+
+  it('clears the member list when the subscription is revoked', async () => {
+    const { client } = await connected();
+    const page = client.join('page.1');
+    const socket = FakeSocket.last();
+    socket.push({ type: 'ack', id: 1, channel: 'presence-page.1', seq: 0, gap: false, members: [{ id: 1, info: {} }, { id: 2, info: {} }] });
+    const lists: number[] = [];
+    page.onMembers((members) => lists.push(members.length));
+    socket.push({ type: 'error', channel: 'presence-page.1', code: 'revoked', message: 'Subscription revoked: forbidden' });
+    expect(page.members()).toEqual([]);
+    expect(lists).toEqual([0]);
   });
 
   it('delivers client events with the sender id', async () => {

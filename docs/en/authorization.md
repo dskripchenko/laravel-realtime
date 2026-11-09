@@ -124,6 +124,44 @@ The hook:
 - must restore the previous context, even on exceptions (`try`/`finally`), because the
   process serves every tenant.
 
+## Revoking access (`reauthorize`)
+
+Authorization is checked when a client subscribes. When access changes later (a role is
+removed, a document is closed to someone), tell the servers to check the channel again:
+
+```php
+// after the change is committed
+Realtime::reauthorize('private-board.42');                 // current scope
+Realtime::reauthorize('presence-page.7', scope: 'acme');   // explicit scope
+```
+
+Every server runs the channel callback again for each of its subscriptions to that channel,
+through `authorizeUsing()` like a subscribe does. Subscriptions that still pass are left
+alone. The others are removed exactly as if the client had unsubscribed: on a presence
+channel the other members get `leave`. The dropped client receives an error and no further
+events:
+
+```json
+{"type":"error","channel":"private-board.42","code":"revoked","message":"Subscription revoked: forbidden"}
+```
+
+A callback that throws counts as denied (`Subscription revoked: error`), and the exception
+goes to your exception handler.
+
+How it works and what to expect:
+
+- `reauthorize()` publishes an ordinary event named `realtime:reauthorize`
+  (`RealtimeManager::REAUTHORIZE`) to the channel and returns its sequence number. The
+  server consumes it and never forwards it, so clients see a skipped `seq`. The
+  `realtime:` prefix is reserved: do not use it for your own event names.
+- No Redis or protocol change is involved, so calling it is safe against any server
+  version. A server that predates the feature forwards the event to clients like any other;
+  the JS client ignores it.
+- Only channels that need it are checked: one callback call per local subscription of the
+  channel. Call it for the channels whose access actually changed.
+- The client may subscribe again; that runs the callback again and fails with `forbidden`
+  while access is still missing.
+
 ## Hardening checklist
 
 - Prefer private channels. Public channels are visible to every logged-in user of the same
@@ -135,6 +173,6 @@ The hook:
 - Keep presence `info` minimal. Every member of the channel sees it.
 - Client events (`client-*`) come straight from other users. Treat their `data` as
   untrusted input, and disable them with `client_events => false` if you do not need them.
-- Revoking access does not drop existing subscriptions. Authorization is checked when a
-  client subscribes. To cut off a user immediately, publish an event that makes the client
-  unsubscribe, or restart the server. Per-connection kick is not part of 0.1.
+- Revoking access does not drop existing subscriptions by itself. Authorization is checked
+  when a client subscribes. Call `Realtime::reauthorize($channel)` after the change to make
+  the servers check existing subscriptions again (see above).

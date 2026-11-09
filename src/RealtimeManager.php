@@ -20,6 +20,12 @@ use Illuminate\Http\Request;
  */
 class RealtimeManager
 {
+    /**
+     * Reserved event name of the control envelope published by reauthorize(). The server consumes it
+     * and never forwards it to clients; the "realtime:" prefix is reserved for the package.
+     */
+    public const REAUTHORIZE = 'realtime:reauthorize';
+
     /** @var (Closure(): string)|null */
     private ?Closure $scopeResolver = null;
 
@@ -106,6 +112,21 @@ class RealtimeManager
         }
 
         return $this->broker()->publish(ChannelName::key($scope, $channel), $message);
+    }
+
+    /**
+     * Asks every realtime server to re-run channel authorization for the existing subscriptions of the
+     * channel in the scope (current scope by default) and to drop the ones that no longer pass, e.g. after
+     * access to the channel was revoked. Dropped clients get an error with code "revoked".
+     *
+     * The request is an ordinary event named self::REAUTHORIZE, so it needs no broker support. Servers
+     * that predate this feature forward it to clients as a regular event instead.
+     *
+     * @return int the request's sequence number in the channel
+     */
+    public function reauthorize(string $channel, ?string $scope = null): int
+    {
+        return $this->publish($channel, self::REAUTHORIZE, [], $scope);
     }
 
     public function issueTicket(Authenticatable $user, ?string $guard = null, ?string $scope = null, ?Request $request = null): IssuedTicket

@@ -94,6 +94,7 @@ board.onAny((event, data, meta) => {});
 board.onSubscribed(() => {});                 // after every (re)subscribe
 board.onError((e) => e.code === 'forbidden' && showNoAccess());
 board.onResync((seq) => reloadBoard());       // missed events are gone: reload state over HTTP
+board.onRevoked((e) => showNoAccess());       // access was revoked: the server dropped the subscription
 off();                                        // remove one handler
 board.unsubscribe();
 
@@ -108,6 +109,10 @@ Wie sich Channel-Aufrufe verhalten:
 - Ein erneutes Abonnieren desselben Namens liefert dasselbe Channel-Objekt.
 - Ereignisse mit einer `seq` kleiner oder gleich der zuletzt angewendeten werden
   verworfen, sodass Replay und Live-Zustellung nie Duplikate erzeugen.
+- `onRevoked` wird ausgelöst, wenn der Server das Abonnement nach `Realtime::reauthorize()`
+  entfernt (Fehlercode `revoked`; `onError` wird ebenfalls ausgelöst). Der Channel gilt als
+  nicht abonniert, die Mitgliederliste eines Presence-Channels wird geleert. Nach einem
+  Reconnect wird erneut abonniert; `unsubscribe()` entfernt den Channel endgültig.
 
 ## Presence
 
@@ -145,7 +150,7 @@ steuern den Client genau so über einen In-Memory-Socket (`js/test/fake-socket.t
 | `leave(name)` | Nach Namen abbestellen |
 | `on('state' \| 'error' \| 'message', fn)` | Client-Ereignisse; gibt eine Abmeldefunktion zurück |
 | `state`, `socketId` | Aktueller Zustand und Socket-ID |
-| `Channel.on/onAny/onSubscribed/onError/onResync/whisper/unsubscribe` | Siehe oben |
+| `Channel.on/onAny/onSubscribed/onError/onRevoked/onResync/whisper/unsubscribe` | Siehe oben |
 | `Channel.lastSeq`, `Channel.subscribed` | Position im Channel und Abonnementstatus |
 | `PresenceChannel.members/onMembers/onJoin/onLeave/refresh` | Presence |
 

@@ -164,6 +164,9 @@ sendet auch selbst Ping-Frames (siehe Keepalive unten).
 - `seq: null` kennzeichnet nicht nachspielbare Nachrichten: Presence-Hinweise und
   Client-Ereignisse.
 - `except` ist intern: die Socket-ID, die der Server übersprungen hat.
+- Ereignisnamen mit dem Präfix `realtime:` sind reserviert. `realtime:reauthorize` ist ein
+  Steuerereignis, das der Server selbst verarbeitet (siehe `revoked`), daher kann `seq`
+  eine Nummer überspringen.
 
 ### Presence-Hinweise
 
@@ -198,12 +201,24 @@ laden und bei `seq` weitermachen.
 | `unknown_type` | Nicht unterstützter `type` |
 | `bad_channel` | Ungültiger Channel-Name |
 | `forbidden` | Autorisierung verweigert oder Client-Ereignis nicht erlaubt |
+| `revoked` | Ein bestehendes Abonnement wurde nach erneuter Autorisierung entfernt (ohne `id`) |
 | `not_subscribed` | `presence`/`event` auf einem Channel, den die Verbindung nicht abonniert hat |
 | `limit` | Zu viele Abonnements |
 | `unavailable` | Redis vorübergehend nicht verfügbar |
 | `internal` | Unerwarteter Serverfehler (wird geloggt) |
 
 Fehler schließen die Verbindung nie.
+
+### revoked
+
+```json
+{"type":"error","channel":"private-board.42","code":"revoked","message":"Subscription revoked: forbidden"}
+```
+
+Ein Fehler ohne `id` mit dem Code `revoked` bedeutet: Die App hat den Server gebeten, den
+Channel erneut zu prüfen (`Realtime::reauthorize()`), und der Callback erlaubt das
+Abonnement nicht mehr. Das Abonnement ist wie nach `unsubscribe` beendet; in einem
+Presence-Channel erhalten die anderen Mitglieder `leave`.
 
 ## Keepalive
 

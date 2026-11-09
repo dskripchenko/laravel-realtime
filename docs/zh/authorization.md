@@ -113,6 +113,33 @@ Realtime::authorizeUsing(function (Ticket $ticket, Closure $next): mixed {
 - 每次订阅运行一次；
 - 即使发生异常也必须恢复之前的上下文（`try`/`finally`），因为该进程服务于所有租户。
 
+## 撤销访问权限（`reauthorize`）
+
+授权在订阅时检查。如果之后访问权限发生变化（角色被移除、文档对某人关闭），请让服务器重新
+检查该频道：
+
+```php
+// 在变更保存之后
+Realtime::reauthorize('private-board.42');                 // 当前 scope
+Realtime::reauthorize('presence-page.7', scope: 'acme');   // 显式 scope
+```
+
+每个服务器会对其在该频道上的每个订阅重新调用频道回调，与订阅时一样经过 `authorizeUsing()`。
+仍然允许的订阅保持不变；其余订阅会像客户端取消订阅一样被移除：在 presence 频道中，其他成员
+会收到 `leave`。被移除的客户端会收到一个错误，并且不再收到事件：
+
+```json
+{"type":"error","channel":"private-board.42","code":"revoked","message":"Subscription revoked: forbidden"}
+```
+
+抛出异常的回调视为拒绝（`Subscription revoked: error`）。
+
+- `reauthorize()` 向频道发布一个名为 `realtime:reauthorize`（`RealtimeManager::REAUTHORIZE`）
+  的普通事件，并返回其序号。服务器自行处理该事件，从不转发，因此客户端会看到 `seq` 跳过一个
+  编号。`realtime:` 前缀为保留前缀。
+- Redis 和协议都没有变化，因此对任何版本的服务器调用都是安全的。旧版服务器会像普通事件一样
+  转发它；JS 客户端会忽略它。
+
 ## 加固清单
 
 - 优先使用 private 频道。public 频道对同一 scope 中所有已登录用户可见。
@@ -122,5 +149,5 @@ Realtime::authorizeUsing(function (Ticket $ticket, Closure $next): mixed {
 - 让 presence `info` 尽量精简，频道的每个成员都能看到它。
 - 客户端事件（`client-*`）直接来自其他用户。请将其 `data` 视为不可信输入；如果不需要，
   用 `client_events => false` 关闭。
-- 撤销访问权限不会断开已有订阅，因为授权只在订阅时检查。要立即切断某个用户，请发布一个
-  让客户端取消订阅的事件，或重启服务器。0.1 不支持按连接踢出。
+- 撤销访问权限本身不会断开已有订阅，因为授权只在订阅时检查。变更之后调用
+  `Realtime::reauthorize($channel)`，让服务器重新检查已有订阅（见上文）。

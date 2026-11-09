@@ -90,6 +90,7 @@ board.onAny((event, data, meta) => {});
 board.onSubscribed(() => {});                 // after every (re)subscribe
 board.onError((e) => e.code === 'forbidden' && showNoAccess());
 board.onResync((seq) => reloadBoard());       // missed events are gone: reload state over HTTP
+board.onRevoked((e) => showNoAccess());       // access was revoked: the server dropped the subscription
 off();                                        // remove one handler
 board.unsubscribe();
 
@@ -104,6 +105,10 @@ realtime.leave('board.42');                   // unsubscribe by name
 - Повторная подписка на то же имя возвращает тот же объект канала.
 - События с `seq`, не большим последнего применённого, отбрасываются, поэтому replay и
   живая доставка никогда не дают дублей.
+- `onRevoked` срабатывает, когда сервер снимает подписку после `Realtime::reauthorize()`
+  (код ошибки `revoked`; `onError` тоже срабатывает). Канал считается неподписанным, список
+  участников presence-канала очищается. После переподключения канал подписывается снова;
+  `unsubscribe()` убирает его окончательно.
 
 ## Presence
 
@@ -141,7 +146,7 @@ page.on('client-typing', (data, meta) => showTyping(meta.userId, data));
 | `leave(name)` | Отписаться по имени |
 | `on('state' \| 'error' \| 'message', fn)` | События клиента; возвращает функцию отписки |
 | `state`, `socketId` | Текущее состояние и id сокета |
-| `Channel.on/onAny/onSubscribed/onError/onResync/whisper/unsubscribe` | См. выше |
+| `Channel.on/onAny/onSubscribed/onError/onRevoked/onResync/whisper/unsubscribe` | См. выше |
 | `Channel.lastSeq`, `Channel.subscribed` | Позиция в канале и состояние подписки |
 | `PresenceChannel.members/onMembers/onJoin/onLeave/refresh` | Presence |
 

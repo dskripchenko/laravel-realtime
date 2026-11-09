@@ -140,6 +140,9 @@ web / queue workers ──EVAL publish──▶ Redis/Valkey ──pub/sub──
 - Set `REALTIME_ALLOWED_ORIGINS` as defence in depth against cross-site WebSocket hijacking.
 - Public channels are readable by every connection in the same scope. Use `private-`
   channels for anything sensitive.
+- Authorization is checked on subscribe. After revoking access, call
+  `Realtime::reauthorize($channel)`: the servers re-check existing subscriptions and drop
+  the ones that no longer pass.
 - Channel callbacks run in a long-lived process. They must not use request state such as
   `request()`, the session or `auth()->user()`. They receive the user from the ticket.
 

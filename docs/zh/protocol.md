@@ -149,6 +149,8 @@ Origin: https://app.example.com
   因为重放与实时投递可能短暂重叠。
 - `seq: null` 标记不可重放的消息：presence 通知和客户端事件。
 - `except` 是内部字段，即服务器跳过的套接字 id。
+- 以 `realtime:` 开头的事件名为保留名称。`realtime:reauthorize` 是由服务器自行处理的控制
+  事件（见 `revoked`），因此 `seq` 可能跳过一个编号。
 
 ### presence 通知
 
@@ -181,12 +183,23 @@ Origin: https://app.example.com
 | `unknown_type` | 不支持的 `type` |
 | `bad_channel` | 频道名无效 |
 | `forbidden` | 授权被拒绝，或不允许该客户端事件 |
+| `revoked` | 重新授权后已有订阅被移除（无 `id`） |
 | `not_subscribed` | 对未订阅的频道执行 `presence`/`event` |
 | `limit` | 订阅过多 |
 | `unavailable` | Redis 暂时不可用 |
 | `internal` | 意外的服务器错误（已记录日志） |
 
 错误从不关闭连接。
+
+### revoked
+
+```json
+{"type":"error","channel":"private-board.42","code":"revoked","message":"Subscription revoked: forbidden"}
+```
+
+不带 `id`、代码为 `revoked` 的错误表示：应用请求服务器重新检查该频道（`Realtime::reauthorize()`），
+而频道回调不再允许该订阅。订阅已像 `unsubscribe` 之后一样被移除；在 presence 频道中，其他
+成员会收到 `leave`。
 
 ## Keepalive
 

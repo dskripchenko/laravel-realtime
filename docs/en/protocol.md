@@ -159,6 +159,8 @@ frames itself (see Keepalive below).
   for a moment.
 - `seq: null` marks messages that are not replayable: presence notices and client events.
 - `except` is internal. It is the socket id the server skipped.
+- Event names starting with `realtime:` are reserved. `realtime:reauthorize` is a control
+  event the server consumes (see `revoked` below), so `seq` may skip a number.
 
 ### presence notices
 
@@ -192,12 +194,25 @@ buffer covers. The client should reload its state and continue from `seq`.
 | `unknown_type` | Unsupported `type` |
 | `bad_channel` | Invalid channel name |
 | `forbidden` | Authorization denied, or client event not allowed |
+| `revoked` | An existing subscription was removed after reauthorization (no `id`) |
 | `not_subscribed` | `presence`/`event` on a channel the connection has not subscribed to |
 | `limit` | Too many subscriptions |
 | `unavailable` | Redis temporarily unavailable |
 | `internal` | Unexpected server error (logged) |
 
 Errors never close the connection.
+
+### revoked
+
+```json
+{"type":"error","channel":"private-board.42","code":"revoked","message":"Subscription revoked: forbidden"}
+```
+
+An error without `id` and with code `revoked` means the server removed an existing
+subscription because the app asked it to check the channel again
+(`Realtime::reauthorize()`) and the channel callback no longer allows it. The subscription
+is gone as after `unsubscribe`: no further events arrive, and on a presence channel the
+other members get `leave`. Subscribing again runs the callback again.
 
 ## Keepalive
 

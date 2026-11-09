@@ -123,6 +123,38 @@ Der Hook:
 - muss den vorherigen Kontext auch bei Exceptions wiederherstellen (`try`/`finally`), weil
   der Prozess alle Mandanten bedient.
 
+## Rechte entziehen (`reauthorize`)
+
+Die Autorisierung wird beim Abonnieren geprüft. Ändern sich die Rechte später (eine Rolle
+wird entzogen, ein Dokument für jemanden gesperrt), lassen Sie die Server den Channel erneut
+prüfen:
+
+```php
+// nachdem die Änderung gespeichert ist
+Realtime::reauthorize('private-board.42');                 // aktueller Scope
+Realtime::reauthorize('presence-page.7', scope: 'acme');   // expliziter Scope
+```
+
+Jeder Server ruft den Channel-Callback für jedes seiner Abonnements dieses Channels erneut
+auf, wie beim Abonnieren über `authorizeUsing()`. Abonnements, die weiterhin erlaubt sind,
+bleiben unverändert. Die übrigen werden so entfernt, als hätte der Client sich abgemeldet:
+In einem Presence-Channel erhalten die anderen Mitglieder `leave`. Der betroffene Client
+erhält einen Fehler und keine weiteren Ereignisse:
+
+```json
+{"type":"error","channel":"private-board.42","code":"revoked","message":"Subscription revoked: forbidden"}
+```
+
+Ein Callback, der eine Exception wirft, gilt als Ablehnung (`Subscription revoked: error`).
+
+- `reauthorize()` veröffentlicht ein gewöhnliches Ereignis namens `realtime:reauthorize`
+  (`RealtimeManager::REAUTHORIZE`) und gibt dessen Sequenznummer zurück. Der Server
+  verarbeitet es selbst und leitet es nie weiter, daher sehen Clients eine übersprungene
+  `seq`. Das Präfix `realtime:` ist reserviert.
+- Weder Redis noch das Protokoll ändern sich, der Aufruf ist also mit jeder Serverversion
+  sicher. Ein älterer Server leitet das Ereignis wie jedes andere weiter; der JS-Client
+  ignoriert es.
+
 ## Härtungs-Checkliste
 
 - Bevorzugen Sie Private-Channels. Public-Channels sind für jeden angemeldeten Benutzer
@@ -135,7 +167,7 @@ Der Hook:
 - Client-Ereignisse (`client-*`) kommen direkt von anderen Benutzern. Behandeln Sie ihre
   `data` als nicht vertrauenswürdige Eingabe und schalten Sie sie mit
   `client_events => false` ab, wenn Sie sie nicht brauchen.
-- Der Entzug von Rechten beendet bestehende Abonnements nicht, denn die Autorisierung wird
-  beim Abonnieren geprüft. Um einen Benutzer sofort abzuschneiden, veröffentlichen Sie ein
-  Ereignis, das den Client abmelden lässt, oder starten Sie den Server neu. Ein gezieltes
-  Trennen einzelner Verbindungen ist nicht Teil von 0.1.
+- Der Entzug von Rechten beendet bestehende Abonnements nicht von selbst, denn die
+  Autorisierung wird beim Abonnieren geprüft. Rufen Sie nach der Änderung
+  `Realtime::reauthorize($channel)` auf, damit die Server bestehende Abonnements erneut
+  prüfen (siehe oben).

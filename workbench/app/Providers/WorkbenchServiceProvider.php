@@ -10,6 +10,7 @@ use Dskripchenko\Realtime\Facades\Realtime;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\ServiceProvider;
+use RuntimeException;
 
 /**
  * Host wiring used by the integration tests' realtime:serve child process.
@@ -42,5 +43,21 @@ final class WorkbenchServiceProvider extends ServiceProvider
         Realtime::channel('board.{id}', static fn (Authenticatable $user, string $id): bool => $id !== '13');
         Realtime::channel('tenant-only.{scope}', static fn (Authenticatable $user, string $scope): bool => ($GLOBALS['realtime_scope'] ?? null) === $scope);
         Realtime::channel('page.{id}', static fn (Authenticatable $user, string $id): array => ['name' => 'User '.$user->getAuthIdentifier()]);
+
+        // Access the tests can revoke at runtime: a flag file per channel id and user ("throw" makes the callback fail).
+        $access = static function (Authenticatable $user, string $id): bool {
+            $flag = sys_get_temp_dir().'/realtime-revoked-'.$id.'-'.$user->getAuthIdentifier();
+            if (! is_file($flag)) {
+                return true;
+            }
+            if (file_get_contents($flag) === 'throw') {
+                throw new RuntimeException('Access check failed');
+            }
+
+            return false;
+        };
+        Realtime::channel('revocable.{id}', $access);
+        Realtime::channel('room.{id}', static fn (Authenticatable $user, string $id): array|false => $access($user, $id)
+            ? ['name' => 'User '.$user->getAuthIdentifier()] : false);
     }
 }
