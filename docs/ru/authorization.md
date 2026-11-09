@@ -34,6 +34,74 @@ Route::middleware(['api', 'auth:sanctum'])->post('/api/realtime/ticket', functio
 });
 ```
 
+### Claims и срок действия
+
+Тикету, выданному для API-токена, а не для сессии браузера, обычно нужно нести больше, чем
+пользователя: что токену разрешено и когда он перестаёт действовать. `issueTicket()`
+принимает и то и другое:
+
+```php
+Realtime::issueTicket(
+    Authenticatable $user,
+    ?string $guard = null,
+    ?string $scope = null,
+    ?Request $request = null,
+    array $claims = [],          // array<string, mixed>, JSON-совместимые, определяет приложение
+    ?int $expiresAt = null,      // unix-секунды; в этот момент соединение завершается
+): IssuedTicket
+```
+
+```php
+$token = $request->user()->currentAccessToken();
+
+return Realtime::issueTicket($request->user(), 'sanctum', request: $request,
+    claims: ['token' => $token->id, 'abilities' => $token->abilities],
+    expiresAt: $token->expires_at?->getTimestamp(),
+);
+```
+
+- **Claims** передаются вместе с тикетом и остаются на соединении как `Ticket::$claims`.
+  Пакет их не интерпретирует. Используйте их в `authorizeUsing()` (см. ниже), чтобы
+  ограничить подписки соединения, и в `disconnect()`, чтобы найти соединение снова. Имена
+  claims — строки; значения должны без изменений переживать `json_encode()`/`json_decode()`
+  (скаляры, `null`, массивы; без объектов). Имена вида `"7"` не допускаются: PHP превращает
+  их в целочисленные ключи.
+- **Срок действия** (`expiresAt`, `Ticket::$expiresAt`) — момент, когда соединение должно
+  завершиться, а не TTL самого тикета (`ticket.ttl` по-прежнему ограничивает время, за
+  которое тикет можно предъявить). Он должен быть в будущем, иначе `issueTicket()` бросает
+  `InvalidArgumentException`. Уже истёкший тикет сервер отклоняет при апгрейде с 401, а
+  открытые соединения проверяет раз в секунду: когда время пришло, клиент получает
+  `{"type":"error","code":"expired","message":"Ticket expired"}` и закрытие с кодом 1008.
+  Подписки завершаются как при любом закрытии (включая presence `leave`).
+  `Ticket::expired(?int $now = null)` сообщает, истёк ли тикет.
+- Тикеты, сохранённые старой версией (без claims и срока), по-прежнему принимаются.
+
+### Отключение по claims (`disconnect`)
+
+Когда токен, по которому открыто соединение, отозван, закройте все соединения, открытые с ним:
+
+```php
+Realtime::disconnect(['token' => $token->id]);                  // текущий scope
+Realtime::disconnect(['token' => $token->id], scope: 'acme');   // явный scope
+```
+
+```php
+Realtime::disconnect(array $claims, ?string $scope = null): void
+```
+
+- Каждый сервер закрывает свои открытые соединения в scope (по умолчанию текущий, как у
+  `publish()`), claims тикета которых содержат **все** переданные пары при строгом
+  сравнении (`===`): `['token' => 5]` не совпадает с тикетом `['token' => '5']`.
+- Клиенты получают `{"type":"error","code":"revoked","message":"Connection revoked"}` и
+  закрытие с кодом 1008. Подписки завершаются как при любом закрытии.
+- Пустой `$claims` бросает `InvalidArgumentException`: вызов не может случайно закрыть все
+  соединения.
+- Запрос идёт по зарезервированному служебному каналу брокера
+  (`RealtimeManager::CONTROL_KEY`), на который подписан каждый сервер и на который клиенты
+  не могут ни подписаться, ни получать из него сообщения. Для replay он не сохраняется:
+  закрываются только соединения, открытые в этот момент. Сначала прекратите выдавать тикеты
+  для токена, затем вызывайте `disconnect()`.
+
 ## Scope
 
 ```php
@@ -115,7 +183,8 @@ Realtime::authorizeUsing(function (Ticket $ticket, Closure $next): mixed {
 
 Хук:
 
-- получает `Ticket` (`userId`, `guard`, `scope`, `issuedAt`);
+- получает `Ticket` (`userId`, `guard`, `scope`, `issuedAt`, `claims`, `expiresAt`), так что
+  может отказать и по claims или сделать их доступными колбэкам каналов на время `$next()`;
 - должен вернуть то, что возвращает `$next()`, либо `false`, чтобы отказать, не вызывая
   его (например, когда тенанта тикета больше нет или он приостановлен);
 - выполняется один раз на подписку;

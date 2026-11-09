@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Dskripchenko\Realtime\Tests\Integration;
 
+use Dskripchenko\Realtime\Auth\Ticket;
 use Dskripchenko\Realtime\Facades\Realtime;
+use Dskripchenko\Realtime\RealtimeManager;
 use Dskripchenko\Realtime\Tests\Support\HandshakeFailed;
 use Dskripchenko\Realtime\Tests\Support\WebSocketClient;
 use Dskripchenko\Realtime\Tests\TestCase;
@@ -392,6 +394,105 @@ final class ServerTest extends TestCase
         }
     }
 
+    public function test_an_expired_ticket_is_rejected_at_the_handshake(): void
+    {
+        $token = bin2hex(random_bytes(32));
+        Realtime::broker()->storeTicket($token, new Ticket(1, null, '', time() - 10, ['token' => 1], time() - 1), 30);
+
+        try {
+            WebSocketClient::connect('127.0.0.1', self::$port, '/?ticket='.$token);
+            $this->fail('an expired ticket must be rejected');
+        } catch (HandshakeFailed $e) {
+            $this->assertSame(401, $e->status);
+        }
+    }
+
+    public function test_claims_reach_channel_authorization(): void
+    {
+        $client = $this->connect(1, '', ['abilities' => ['read']]);
+        $client->sendJson(['type' => 'subscribe', 'id' => 1, 'channel' => 'private-ability.read']);
+        $this->assertSame('ack', $client->receiveJson()['type'] ?? null);
+        $client->sendJson(['type' => 'subscribe', 'id' => 2, 'channel' => 'private-ability.write']);
+        $this->assertSame('forbidden', $client->receiveJson()['code'] ?? null);
+        $client->close();
+    }
+
+    public function test_the_connection_is_closed_when_its_ticket_expires(): void
+    {
+        $channel = 'presence-room.'.$this->uniqueId();
+        $watcher = $this->connect(1);
+        $watcher->sendJson(['type' => 'subscribe', 'id' => 1, 'channel' => $channel]);
+        $this->assertSame('ack', $watcher->receiveJson()['type'] ?? null);
+
+        $client = $this->connect(2, '', ['token' => 'short'], time() + 2);
+        $client->sendJson(['type' => 'subscribe', 'id' => 1, 'channel' => $channel]);
+        $this->assertSame('ack', $client->receiveJson()['type'] ?? null);
+        $client->sendJson(['type' => 'ping', 'id' => 'alive']);
+        $client->waitFor(static fn (array $m): bool => ($m['id'] ?? null) === 'alive');
+
+        $error = $client->waitFor(static fn (array $m): bool => ($m['type'] ?? null) === 'error', 5.0);
+        $this->assertSame(['type' => 'error', 'code' => 'expired', 'message' => 'Ticket expired'], $error);
+        $close = $client->receive() ?? $this->fail('expected close');
+        $this->assertSame(Opcode::Close, $close->opcode);
+        $this->assertSame(CloseCode::POLICY_VIOLATION, $close->closeStatus()[0]);
+
+        $leave = $watcher->waitFor(static fn (array $m): bool => ($m['action'] ?? null) === 'leave');
+        $this->assertSame(2, $leave['member']['id'], 'presence leave as on any close');
+        $watcher->sendJson(['type' => 'ping', 'id' => 'still']);
+        $this->assertSame(['type' => 'pong', 'id' => 'still'], $watcher->receiveJson(), 'a ticket without expiry stays open');
+        $watcher->close();
+    }
+
+    public function test_disconnect_closes_only_matching_connections_of_the_scope(): void
+    {
+        $token = $this->uniqueId();
+        $channel = 'presence-room.'.$this->uniqueId();
+        $match = $this->connect(1, '', ['token' => $token, 'kind' => 'api']);
+        $otherToken = $this->connect(2, '', ['token' => $token.'x', 'kind' => 'api']);
+        $looseType = $this->connect(3, '', ['token' => (int) hexdec($token)]);
+        $noClaims = $this->connect(4);
+        $otherScope = $this->connect(5, 'acme', ['token' => $token, 'kind' => 'api']);
+        foreach ([$match, $otherToken] as $client) {
+            $client->sendJson(['type' => 'subscribe', 'id' => 1, 'channel' => $channel]);
+            $this->assertSame('ack', $client->receiveJson()['type'] ?? null);
+        }
+        $match->waitFor(static fn (array $m): bool => ($m['action'] ?? null) === 'join' && ($m['member']['id'] ?? null) === 2);
+
+        Realtime::disconnect(['token' => $token]);
+
+        $this->assertSame(['type' => 'error', 'code' => 'revoked', 'message' => 'Connection revoked'], $match->receiveJson());
+        $close = $match->receive() ?? $this->fail('expected close');
+        $this->assertSame([Opcode::Close, CloseCode::POLICY_VIOLATION], [$close->opcode, $close->closeStatus()[0]]);
+
+        $leave = $otherToken->waitFor(static fn (array $m): bool => ($m['action'] ?? null) === 'leave');
+        $this->assertSame(1, $leave['member']['id'], 'presence leave as on any close');
+        foreach ([$otherToken, $looseType, $noClaims, $otherScope] as $i => $client) {
+            $client->sendJson(['type' => 'ping', 'id' => $i]);
+            $this->assertSame(['type' => 'pong', 'id' => $i], $client->receiveJson(), "connection {$i} stays open and sees no control message");
+        }
+
+        // All pairs must match.
+        Realtime::disconnect(['token' => $token, 'kind' => 'web'], 'acme');
+        $otherScope->sendJson(['type' => 'ping', 'id' => 'kept']);
+        $this->assertSame(['type' => 'pong', 'id' => 'kept'], $otherScope->receiveJson());
+
+        Realtime::disconnect(['token' => $token, 'kind' => 'api'], 'acme');
+        $this->assertSame('revoked', $otherScope->receiveJson()['code'] ?? null);
+        $this->assertSame(Opcode::Close, ($otherScope->receive() ?? $this->fail('expected close'))->opcode);
+
+        foreach ([$otherToken, $looseType, $noClaims] as $client) {
+            $client->close();
+        }
+    }
+
+    public function test_the_control_channel_cannot_be_subscribed_to(): void
+    {
+        $client = $this->connect(1);
+        $client->sendJson(['type' => 'subscribe', 'id' => 1, 'channel' => RealtimeManager::CONTROL_KEY]);
+        $this->assertSame('bad_channel', $client->receiveJson()['code'] ?? null);
+        $client->close();
+    }
+
     public function test_events_published_while_the_pubsub_link_is_down_are_delivered_after_reconnect(): void
     {
         $client = $this->connect(1);
@@ -420,6 +521,12 @@ final class ServerTest extends TestCase
         Realtime::publish('outage', 'After');
         $this->assertSame('After', $client->receiveJson()['event'] ?? null);
         $client->close();
+
+        // The control channel is subscribed again after the reconnect.
+        $token = $this->uniqueId();
+        $revocable = $this->connect(2, '', ['token' => $token]);
+        Realtime::disconnect(['token' => $token]);
+        $this->assertSame('revoked', $revocable->receiveJson()['code'] ?? null);
     }
 
     public function test_rate_limit_closes_flooding_connections(): void
@@ -482,9 +589,12 @@ final class ServerTest extends TestCase
         $this->flags[] = $flag;
     }
 
-    private function connect(int $userId, string $scope = ''): WebSocketClient
+    /**
+     * @param  array<string, mixed>  $claims
+     */
+    private function connect(int $userId, string $scope = '', array $claims = [], ?int $expiresAt = null): WebSocketClient
     {
-        $ticket = Realtime::issueTicket(new GenericUser(['id' => $userId]), null, $scope);
+        $ticket = Realtime::issueTicket(new GenericUser(['id' => $userId]), null, $scope, null, $claims, $expiresAt);
         $client = WebSocketClient::connect('127.0.0.1', self::$port, '/?ticket='.$ticket->token);
         $welcome = $client->receiveJson() ?? throw new RuntimeException('no welcome');
         $this->assertSame('welcome', $welcome['type'] ?? null);

@@ -26,6 +26,13 @@ class RealtimeManager
      */
     public const REAUTHORIZE = 'realtime:reauthorize';
 
+    /**
+     * Reserved broker key of the control channel every realtime server subscribes to (see disconnect()).
+     * It has no "/" and starts with a character that channel names and scopes may not contain, so no
+     * client subscription can ever map to it; its messages are never forwarded to clients.
+     */
+    public const CONTROL_KEY = '#realtime:control';
+
     /** @var (Closure(): string)|null */
     private ?Closure $scopeResolver = null;
 
@@ -129,18 +136,59 @@ class RealtimeManager
         return $this->publish($channel, self::REAUTHORIZE, [], $scope);
     }
 
-    public function issueTicket(Authenticatable $user, ?string $guard = null, ?string $scope = null, ?Request $request = null): IssuedTicket
+    /**
+     * Asks every realtime server to close its open connections in the scope (current scope by default)
+     * whose ticket claims contain all the given key/value pairs (strict comparison), e.g. after the API
+     * token the tickets were issued for has been revoked. The clients get an error with code "revoked"
+     * and a close with code 1008.
+     *
+     * The request goes over the broker's control channel and is not replayed: only connections open at
+     * that moment are affected, so stop issuing tickets for the same claims first.
+     *
+     * @param  array<string, mixed>  $claims  must not be empty
+     */
+    public function disconnect(array $claims, ?string $scope = null): void
     {
+        if ($claims === []) {
+            throw new \InvalidArgumentException('Claims to disconnect by must not be empty');
+        }
+        self::assertClaims($claims);
+        $scope ??= $this->currentScope();
+        ChannelName::assertValidScope($scope);
+
+        $this->broker()->publishVolatile(self::CONTROL_KEY, ['type' => 'disconnect', 'scope' => $scope, 'claims' => $claims]);
+    }
+
+    /**
+     * Issues a single-use ticket for one WebSocket connection.
+     *
+     * @param  array<string, mixed>  $claims  JSON-safe, host-defined context the connection carries (Ticket::$claims),
+     *                                        e.g. the scopes and id of an API token; disconnect() matches against it
+     * @param  int|null  $expiresAt  unix seconds when the connection must end (e.g. the token's expiry); must be in the future
+     */
+    public function issueTicket(
+        Authenticatable $user,
+        ?string $guard = null,
+        ?string $scope = null,
+        ?Request $request = null,
+        array $claims = [],
+        ?int $expiresAt = null,
+    ): IssuedTicket {
         $id = $user->getAuthIdentifier();
         if (! is_int($id) && ! is_string($id)) {
             throw new \InvalidArgumentException('User identifier must be an integer or a string');
+        }
+        self::assertClaims($claims);
+        $now = time();
+        if ($expiresAt !== null && $expiresAt <= $now) {
+            throw new \InvalidArgumentException('Ticket expiry must be in the future');
         }
         $scope ??= $this->currentScope();
         ChannelName::assertValidScope($scope);
 
         $ttl = $this->configInt('realtime.ticket.ttl', 30);
         $token = bin2hex(random_bytes(32));
-        $this->broker()->storeTicket($token, new Ticket($id, $guard, $scope, time()), $ttl);
+        $this->broker()->storeTicket($token, new Ticket($id, $guard, $scope, $now, $claims, $expiresAt), $ttl);
 
         return new IssuedTicket($token, $this->publicUrl($request), $ttl);
     }
@@ -159,6 +207,17 @@ class RealtimeManager
     public function authorizer(): ChannelAuthorizer
     {
         return $this->authorizer;
+    }
+
+    /**
+     * Claims arrive from host code, so their documented shape is checked at runtime: a list would not
+     * survive the JSON round trip as a claims map.
+     */
+    private static function assertClaims(mixed $claims): void
+    {
+        if (! Ticket::isValidClaims($claims)) {
+            throw new \InvalidArgumentException('Claim names must be strings');
+        }
     }
 
     private function publicUrl(?Request $request): ?string

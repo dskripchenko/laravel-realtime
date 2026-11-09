@@ -30,6 +30,66 @@ Route::middleware(['api', 'auth:sanctum'])->post('/api/realtime/ticket', functio
 });
 ```
 
+### Claims 与过期时间
+
+为 API 令牌（而不是浏览器会话）签发的票据，通常需要携带比用户更多的信息：令牌允许做什么，
+以及何时失效。`issueTicket()` 两者都接受：
+
+```php
+Realtime::issueTicket(
+    Authenticatable $user,
+    ?string $guard = null,
+    ?string $scope = null,
+    ?Request $request = null,
+    array $claims = [],          // array<string, mixed>，可 JSON 序列化，由应用定义
+    ?int $expiresAt = null,      // Unix 秒；连接在此时结束
+): IssuedTicket
+```
+
+```php
+$token = $request->user()->currentAccessToken();
+
+return Realtime::issueTicket($request->user(), 'sanctum', request: $request,
+    claims: ['token' => $token->id, 'abilities' => $token->abilities],
+    expiresAt: $token->expires_at?->getTimestamp(),
+);
+```
+
+- **Claims** 随票据传递，并作为 `Ticket::$claims` 保留在连接上。包本身不解释它们。可在
+  `authorizeUsing()`（见下文）中用它们限制连接可订阅的内容，并在 `disconnect()` 中用它们
+  找到连接。claim 名称必须是字符串；值必须能原样经过 `json_encode()`/`json_decode()`
+  （标量、`null`、数组；不能是对象）。不允许 `"7"` 这样的名称，因为 PHP 会把它变成整数键。
+- **过期时间**（`expiresAt`、`Ticket::$expiresAt`）是连接必须结束的时刻，而不是票据本身的
+  TTL（`ticket.ttl` 仍然限制票据可被兑换的时长）。它必须在未来，否则 `issueTicket()` 抛出
+  `InvalidArgumentException`。服务器在升级时以 401 拒绝已过期的票据，并每秒检查一次已打开的
+  连接：时间一到，客户端会收到 `{"type":"error","code":"expired","message":"Ticket expired"}`
+  以及关闭码 1008。订阅像任何关闭一样结束（包括 presence `leave`）。
+  `Ticket::expired(?int $now = null)` 判断票据是否已过期。
+- 旧版本存储的票据（没有 claims 和过期时间）仍然被接受。
+
+### 按 claims 断开连接（`disconnect`）
+
+当连接背后的令牌被撤销时，关闭用它打开的所有连接：
+
+```php
+Realtime::disconnect(['token' => $token->id]);                  // 当前 scope
+Realtime::disconnect(['token' => $token->id], scope: 'acme');   // 显式 scope
+```
+
+```php
+Realtime::disconnect(array $claims, ?string $scope = null): void
+```
+
+- 每台服务器关闭该 scope（默认是当前 scope，与 `publish()` 的解析方式相同）中、票据 claims
+  包含**全部**给定键值对的已打开连接，比较是严格的（`===`）：`['token' => 5]` 不匹配
+  `['token' => '5']` 的票据。
+- 客户端会收到 `{"type":"error","code":"revoked","message":"Connection revoked"}` 以及关闭码
+  1008。订阅像任何关闭一样结束。
+- 空的 `$claims` 会抛出 `InvalidArgumentException`：该调用永远不会意外关闭所有连接。
+- 请求通过 broker 的保留控制频道（`RealtimeManager::CONTROL_KEY`）传递，每台服务器都订阅它，
+  客户端既不能订阅也收不到它。它不会被保存用于 replay：只关闭此刻已打开的连接。请先停止为该
+  令牌签发票据，再调用 `disconnect()`。
+
 ## Scope
 
 ```php
@@ -107,7 +167,8 @@ Realtime::authorizeUsing(function (Ticket $ticket, Closure $next): mixed {
 
 该钩子：
 
-- 接收 `Ticket`（`userId`、`guard`、`scope`、`issuedAt`）；
+- 接收 `Ticket`（`userId`、`guard`、`scope`、`issuedAt`、`claims`、`expiresAt`），因此也可以
+  按 claims 拒绝，或在 `$next()` 执行期间把它们提供给频道回调；
 - 必须返回 `$next()` 的返回值，或返回 `false` 以在不调用它的情况下拒绝（例如票据所属租户
   已不存在或已停用）；
 - 每次订阅运行一次；

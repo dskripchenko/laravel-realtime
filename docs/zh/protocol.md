@@ -183,13 +183,14 @@ Origin: https://app.example.com
 | `unknown_type` | 不支持的 `type` |
 | `bad_channel` | 频道名无效 |
 | `forbidden` | 授权被拒绝，或不允许该客户端事件 |
-| `revoked` | 重新授权后已有订阅被移除（无 `id`） |
+| `revoked` | 重新授权后已有订阅被移除（无 `id`，带 `channel`），或整个连接被撤销（无 `id` 和 `channel`；随后关闭） |
+| `expired` | 票据已过期（无 `id` 和 `channel`；随后关闭） |
 | `not_subscribed` | 对未订阅的频道执行 `presence`/`event` |
 | `limit` | 订阅过多 |
 | `unavailable` | Redis 暂时不可用 |
 | `internal` | 意外的服务器错误（已记录日志） |
 
-错误从不关闭连接。
+错误从不关闭连接，下面两种连接级错误除外（不带 `channel` 的 `revoked`，以及 `expired`）。
 
 ### revoked
 
@@ -200,6 +201,18 @@ Origin: https://app.example.com
 不带 `id`、代码为 `revoked` 的错误表示：应用请求服务器重新检查该频道（`Realtime::reauthorize()`），
 而频道回调不再允许该订阅。订阅已像 `unsubscribe` 之后一样被移除；在 presence 频道中，其他
 成员会收到 `leave`。
+
+### 连接被撤销或已过期
+
+```json
+{"type":"error","code":"revoked","message":"Connection revoked"}
+{"type":"error","code":"expired","message":"Ticket expired"}
+```
+
+不带 `channel` 时，这两种错误会结束整个连接：随后是关闭码为 1008 的关闭帧。`revoked` 表示
+应用关闭了用某些票据 claims 打开的连接（`Realtime::disconnect()`），例如其背后的 API 令牌
+已被撤销。`expired` 表示票据签发时指定的过期时间已到。新连接需要新票据；客户端能否拿到，
+由票据端点决定。
 
 ## Keepalive
 
@@ -216,7 +229,7 @@ Origin: https://app.example.com
 | 1002 | 协议错误（未掩码的帧、错误的 opcode、RSV 位、错误的续帧、错误的 close 负载） |
 | 1003 | 二进制消息 |
 | 1007 | 文本消息不是有效的 UTF-8 |
-| 1008 | 超出速率限制（`limits.messages_per_second`） |
+| 1008 | 超出速率限制（`limits.messages_per_second`）；票据已过期；连接被 `Realtime::disconnect()` 撤销 |
 | 1009 | 帧或消息超过限制 |
 | 4000 | Keepalive 超时 |
 | 4008 | 慢消费者：等待发送的数据超过 `limits.max_buffer` 字节 |

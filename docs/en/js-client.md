@@ -56,6 +56,12 @@ When the connection drops, the client:
 3. resubscribes every channel with `since = lastSeq`, so the server replays what was
    missed.
 
+A connection the server ends on purpose (`revoked` or `expired` error, close code 1008) is
+reported through the client's `error` event and handled like any other drop: the client
+waits, then asks the ticket endpoint again. If the credentials behind it are no longer
+valid, the endpoint should answer 401 or 403, and the client stops. Otherwise the client
+connects again with a fresh ticket.
+
 Set `reconnect: false` to stay closed after a drop, or `maxAttempts` to give up after a
 number of tries. `close()` is final until you call `connect()` again. Subscriptions are
 kept for that next `connect()`.

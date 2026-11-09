@@ -57,6 +57,12 @@ Bricht die Verbindung ab, geht der Client so vor:
 3. abonniert jeden Channel erneut mit `since = lastSeq`, sodass der Server das Verpasste
    nachspielt.
 
+Eine Verbindung, die der Server absichtlich beendet (Fehler `revoked` oder `expired`,
+Close-Code 1008), wird über das `error`-Ereignis des Clients gemeldet und wie jeder Abbruch
+behandelt: Der Client wartet und fragt den Ticket-Endpunkt erneut. Sind die Anmeldedaten
+dahinter nicht mehr gültig, sollte der Endpunkt mit 401 oder 403 antworten, und der Client
+hört auf. Andernfalls verbindet er sich mit einem frischen Ticket neu.
+
 Mit `reconnect: false` bleibt der Client nach einem Abbruch geschlossen, mit `maxAttempts`
 gibt er nach einer Anzahl von Versuchen auf. `close()` ist endgültig, bis Sie erneut
 `connect()` aufrufen. Abonnements bleiben für dieses nächste `connect()` erhalten.
