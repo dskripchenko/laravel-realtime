@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-09
+
 ### Added
 
 - Ticket claims and expiry. `Ticket` gains `array $claims` (host-defined, JSON-safe,
@@ -77,6 +79,7 @@ All notable changes to this project are documented in this file. The format foll
 - Redis Cluster and predis.
 - UI kit adapter for `@dskripchenko/ui` components.
 
-[Unreleased]: https://github.com/dskripchenko/laravel-realtime/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/dskripchenko/laravel-realtime/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/dskripchenko/laravel-realtime/releases/tag/v0.3.0
 [0.2.0]: https://github.com/dskripchenko/laravel-realtime/releases/tag/v0.2.0
 [0.1.0]: https://github.com/dskripchenko/laravel-realtime/releases/tag/v0.1.0
